@@ -1,4 +1,5 @@
 const { Client, GatewayIntentBits, Partials, ActivityType } = require('discord.js');
+const express = require('express');
 require('dotenv').config();
 
 // Initialisation du Client avec les Intents et Partials requis
@@ -69,6 +70,20 @@ client.once('clientReady', (c) => {
 // ==========================================
 client.on('guildMemberAdd', (member) => guildMemberAdd(client, member));
 client.on('messageCreate', (message) => messageCreate(client, message));
+
+// ==========================================
+// 🌐 SERVEUR EXPRESS (FIX RENDER PORT TIMEOUT)
+// ==========================================
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+    res.send('🛡️ Aeroz Fortress Bot est 100% en ligne !');
+});
+
+app.listen(PORT, () => {
+    console.log(`🌐 [Render WebServer] Serveur web actif sur le port ${PORT}`);
+});
 
 // ==========================================
 // 🛡️ SÉCURITÉ ANTI-CRASH (Evite l'arrêt du bot)
