@@ -16,11 +16,11 @@ const path = require("path");
 // (Remplace avec tes propres IDs)
 // ==========================================
 const CHANNELS = {
-    ANTI_RAID: "1532049300182269982",       // Vagues de raid & Comptes < 24h
-    ANTI_BOT: "1532049330544972026",        // Tentatives d'ajout de bots non autorisés
-    ANTI_LINK: "1532049395225333821",       // Liens d'invitations Discord supprimés
-    ANTI_NUKE: "1532049414925979798",       // Dépassements de quotas & Sanctions Staff
-    SANCTION_AUTO: "1532049436631633990"   // Récapitulatif global des actions auto
+    ANTI_RAID: "1534142396491628604",       // Vagues de raid & Comptes < 24h
+    ANTI_BOT: "1534142397670359050",        // Tentatives d'ajout de bots non autorisés
+    ANTI_LINK: "1534142400409108520",       // Liens d'invitations Discord supprimés
+    ANTI_NUKE: "1534142401818398730",       // Dépassements de quotas & Sanctions Staff
+    SANCTION_AUTO: "1534142403525742642"   // Récapitulatif global des actions auto
 };
 
 // --- BASE DE DONNÉES ANTI-NUKE ---
@@ -72,7 +72,7 @@ const VERIFIED_ROLE_NAME = "Membre";
 
 module.exports = (client) => {
 
-    console.log("[🛡️ AEROZ FORTRESS] Système Anti-Nuke, Anti-Link & Verification prêt.");
+    console.log("[🛡️ AKORA FORTRESS] Système Anti-Nuke, Anti-Link & Verification prêt.");
 
     // --- FONCTION UTILITAIRE : ENVOI DE LOGS ULTRA-DÉTAILLÉS ---
     const sendLog = async (chanId, embed) => {
@@ -121,7 +121,7 @@ module.exports = (client) => {
                 { name: "⚠️ Motif de la Sanction", value: `\`${reason}\``, inline: false },
                 { name: "📦 Quarantaine", value: `\`${rolesToStrip.size}\` rôle(s) sauvegardé(s) en mémoire.`, inline: false }
             )
-            .setFooter({ text: "Aeroz Fortress Security", iconURL: client.user.displayAvatarURL() })
+            .setFooter({ text: "Akora Fortress Security", iconURL: client.user.displayAvatarURL() })
             .setTimestamp();
 
         sendLog(CHANNELS.ANTI_NUKE, criticalEmbed);
@@ -197,7 +197,7 @@ module.exports = (client) => {
             await msg.delete().catch(() => {});
 
             // 2. Avertissement temporaire dans le salon
-            const warnMsg = await msg.channel.send(`⚠️ <@${msg.author.id}>, les liens d'invitations Discord sont strictement interdits ici !`).catch(() => null);
+            const warnMsg = await msg.channel.send(`⚠️ <@${msg.author.id}>, les liens d'invitations Discord sont strictly interdits ici !`).catch(() => null);
             if (warnMsg) setTimeout(() => warnMsg.delete().catch(() => {}), 5000);
 
             // 3. Log Détaillé
@@ -214,7 +214,7 @@ module.exports = (client) => {
                     { name: "📅 Date & Heure", value: timestampFormat, inline: false },
                     { name: "💬 Contenu du Message", value: `\`\`\`${msg.content.slice(0, 1000)}\`\`\``, inline: false }
                 )
-                .setFooter({ text: "Aeroz Fortress Anti-Pub", iconURL: client.user.displayAvatarURL() })
+                .setFooter({ text: "Akora Fortress Anti-Pub", iconURL: client.user.displayAvatarURL() })
                 .setTimestamp();
 
             sendLog(CHANNELS.ANTI_LINK, linkEmbed);
@@ -251,7 +251,7 @@ module.exports = (client) => {
                     { name: "📅 Date de Création du compte", value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:F>`, inline: false },
                     { name: "🕒 Expulsé le", value: timestampFormat, inline: false }
                 )
-                .setFooter({ text: "Aeroz Fortress Protection", iconURL: client.user.displayAvatarURL() });
+                .setFooter({ text: "Akora Fortress Protection", iconURL: client.user.displayAvatarURL() });
 
             sendLog(CHANNELS.ANTI_RAID, altLogEmbed);
             return;
@@ -290,7 +290,7 @@ module.exports = (client) => {
                 .setTitle("🚨 ALERTE RAID DÉTECTÉE")
                 .setDescription(`Afflux massif de **${recentJoins.length} nouveaux membres** en moins de 30 secondes.`)
                 .addFields({ name: "📅 Date & Heure", value: timestampFormat, inline: false })
-                .setFooter({ text: "Aeroz Fortress Anti-Raid", iconURL: client.user.displayAvatarURL() });
+                .setFooter({ text: "Akora Fortress Anti-Raid", iconURL: client.user.displayAvatarURL() });
 
             sendLog(CHANNELS.ANTI_RAID, raidEmbed);
             setTimeout(() => { raidAlertOn = false; }, 60000); // Réinitialisation de l'alerte après 1 min

@@ -33,7 +33,7 @@ const antiNuke = require('./modules/antiNuke');
 // ==========================================
 client.once('clientReady', (c) => {
     console.log(`\n==========================================`);
-    console.log(`✅ [AEROZ FORTRESS] Connecté avec succès en tant que : ${c.user.tag}`);
+    console.log(`✅ [AKORA FORTRESS] Connecté avec succès en tant que : ${c.user.tag}`);
     console.log(`🛡️  Système de Protection : Opérationnel`);
     console.log(`==========================================\n`);
 
@@ -42,7 +42,7 @@ client.once('clientReady', (c) => {
 
     // 🎭 GESTION DU STATUT DYNAMIQUE PRO
     const activities = [
-        { name: '🛡️ Aeroz Fortress | Protection Active', type: ActivityType.Watching },
+        { name: '🛡️ Akora Fortress | Protection Active', type: ActivityType.Watching },
         { name: () => `👥 ${client.guilds.cache.reduce((acc, g) => acc + g.memberCount, 0)} membres sécurisés`, type: ActivityType.Watching },
         { name: '🔒 Anti-Nuke & Anti-Spam', type: ActivityType.Competing }
     ];
@@ -78,7 +78,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-    res.send('🛡️ Aeroz Fortress Bot est 100% en ligne !');
+    res.send('🛡️ Akora Fortress Bot est 100% en ligne !');
 });
 
 app.listen(PORT, () => {

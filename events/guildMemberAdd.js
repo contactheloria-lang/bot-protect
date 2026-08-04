@@ -3,8 +3,8 @@ const fs = require("fs");
 const path = require("path");
 
 // Configuration des salons de logs (récupère l'ID ou prend celui par défaut)
-const LOGS_ANTI_RAID_ID = process.env.LOGS_ANTI_RAID_ID || "1532049300182269982";
-const LOGS_ANTI_BOT_ID = process.env.LOGS_ANTI_BOT_ID || "1528212667930509462";
+const LOGS_ANTI_RAID_ID = process.env.LOGS_ANTI_RAID_ID || "1534142396491628604";
+const LOGS_ANTI_BOT_ID = process.env.LOGS_ANTI_BOT_ID || "1534142397670359050";
 const DB_PATH = path.join(__dirname, "../data", "fortress_antispam_db.json");
 const OWNER_ID = process.env.OWNER_ID || "1431661348218998948";
 
@@ -38,7 +38,7 @@ module.exports = async (client, member) => {
                     { name: "👤 Invité par", value: `<@${executor.id}> (\`${executor.id}\`)`, inline: true },
                     { name: "📅 Date & Heure", value: `<t:${nowTimestamp}:F>`, inline: false }
                 )
-                .setFooter({ text: "Aeroz Fortress Security", iconURL: client.user.displayAvatarURL() });
+                .setFooter({ text: "Akora Fortress Security", iconURL: client.user.displayAvatarURL() });
 
             const botLogChan = await client.channels.fetch(LOGS_ANTI_BOT_ID).catch(() => null);
             if (botLogChan) botLogChan.send({ embeds: [botLogEmbed] }).catch(() => {});
@@ -75,7 +75,7 @@ module.exports = async (client, member) => {
                 { name: "📅 Création du Compte", value: `<t:${createdTimestamp}:F>`, inline: false },
                 { name: "🕒 Expulsé le", value: `<t:${nowTimestamp}:F>`, inline: false }
             )
-            .setFooter({ text: "Aeroz Fortress Anti-Raid", iconURL: client.user.displayAvatarURL() })
+            .setFooter({ text: "Akora Fortress Anti-Raid", iconURL: client.user.displayAvatarURL() })
             .setTimestamp();
 
         const raidLogChan = await client.channels.fetch(LOGS_ANTI_RAID_ID).catch(() => null);
