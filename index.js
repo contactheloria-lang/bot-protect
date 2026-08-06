@@ -18,8 +18,7 @@ const client = new Client({
 // 📌 GESTION DE LA MÉMOIRE ET ÉTATS GLOBAUX
 // ==========================================
 client.isLockdown = false;
-client.captchaSessions = new Map(); // userID -> answer/session
-client.spamTracker = new Map();     // userID -> { count, firstMsgTime, warns }
+client.spamTracker = new Map(); // userID -> { count, firstMsgTime, warns }
 
 // ==========================================
 // 📦 IMPORT DES MODULES ET ÉVÉNEMENTS
@@ -33,36 +32,18 @@ const antiNuke = require('./modules/antiNuke');
 // ==========================================
 client.once('clientReady', (c) => {
     console.log(`\n==========================================`);
-    console.log(`✅ [AKORA FORTRESS] Connecté avec succès en tant que : ${c.user.tag}`);
+    console.log(`✅ [TEAM HELORIA FORTRESS] Connecté avec succès en tant que : ${c.user.tag}`);
     console.log(`🛡️  Système de Protection : Opérationnel`);
     console.log(`==========================================\n`);
 
     // Initialisation de l'Anti-Nuke
     antiNuke(client);
 
-    // 🎭 GESTION DU STATUT DYNAMIQUE PRO
-    const activities = [
-        { name: '🛡️ Akora Fortress | Protection Active', type: ActivityType.Watching },
-        { name: () => `👥 ${client.guilds.cache.reduce((acc, g) => acc + g.memberCount, 0)} membres sécurisés`, type: ActivityType.Watching },
-        { name: '🔒 Anti-Nuke & Anti-Spam', type: ActivityType.Competing }
-    ];
-
-    let activityIndex = 0;
-
-    const updatePresence = () => {
-        const currentActivity = activities[activityIndex];
-        const name = typeof currentActivity.name === 'function' ? currentActivity.name() : currentActivity.name;
-
-        client.user.setPresence({
-            activities: [{ name, type: currentActivity.type }],
-            status: 'dnd', // Ne pas déranger (Rouge = Style Sécurité)
-        });
-
-        activityIndex = (activityIndex + 1) % activities.length;
-    };
-
-    updatePresence();
-    setInterval(updatePresence, 30000); // Change le statut toutes les 30 secondes
+    // 🎭 GESTION DU STATUT INACTIF & ACTIVITÉ
+    client.user.setPresence({
+        activities: [{ name: 'Dev par Logs', type: ActivityType.Custom }],
+        status: 'invisible' // Statut Inactif / Hors-ligne
+    });
 });
 
 // ==========================================
@@ -78,7 +59,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-    res.send('🛡️ Akora Fortress Bot est 100% en ligne !');
+    res.send('🛡️ Team HeLoRiA Fortress Bot est 100% en ligne !');
 });
 
 app.listen(PORT, () => {
@@ -86,7 +67,7 @@ app.listen(PORT, () => {
 });
 
 // ==========================================
-// 🛡️ SÉCURITÉ ANTI-CRASH (Evite l'arrêt du bot)
+// 🛡️ SÉCURITÉ ANTI-CRASH (Évite l'arrêt du bot)
 // ==========================================
 process.on('unhandledRejection', (reason, promise) => {
     console.error('⚠️ [Anti-Crash] Rejet non géré :', reason);
