@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 
 // Configuration du salon de logs Anti-Spam (ID configurable)
-const LOGS_ANTI_SPAM_ID = process.env.LOGS_ANTI_SPAM_ID || "1534142399054610542";
+const LOGS_ANTI_SPAM_ID = process.env.LOGS_ANTI_SPAM_ID || "1532049373540651319";
 const DB_PATH = path.join(__dirname, "../data", "fortress_antispam_db.json");
 const OWNER_ID = process.env.OWNER_ID || "1431661348218998948";
 
@@ -152,7 +152,7 @@ module.exports = async function handleAntiSpam(client, message) {
                 { name: "📅 Date & Heure", value: timestampFormat, inline: true },
                 { name: "💬 Extrait du Message", value: `\`\`\`${content.slice(0, 1000) || "[Aucun texte]"}\`\`\``, inline: false }
             )
-            .setFooter({ text: "Akora Fortress Anti-Spam System", iconURL: client.user.displayAvatarURL() })
+            .setFooter({ text: "Team HeLoRiA Fortress Anti-Spam System", iconURL: client.user.displayAvatarURL() })
             .setTimestamp();
 
         const logChan = await client.channels.fetch(LOGS_ANTI_SPAM_ID).catch(() => null);

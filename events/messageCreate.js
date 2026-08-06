@@ -2,61 +2,22 @@ const { EmbedBuilder } = require("discord.js");
 const lockdownCmd = require("../commands/lockdown");
 const handleAntiSpam = require("../modules/antiSpam");
 
-const UNVERIFIED_ROLE_NAME = "Non-Vérifié";
-const VERIFIED_ROLE_NAME = "Membre";
-
 module.exports = async (client, message) => {
-    if (message.author.bot) return;
+    // On ignore les bots et les messages privés
+    if (message.author.bot || !message.guild) return;
 
-    // Sécurisation des Maps de mémoire sur le client
-    if (!client.captchaSessions) client.captchaSessions = new Map();
+    // Sécurisation de la Map de suivi du flood
     if (!client.spamTracker) client.spamTracker = new Map();
 
     // ==========================================
-    // 📩 A. RÉPONSES AU CAPTCHA (MESSAGE PRIVÉ)
-    // ==========================================
-    if (!message.guild) {
-        if (client.captchaSessions.has(message.author.id)) {
-            const session = client.captchaSessions.get(message.author.id);
-            const expectedAnswer = typeof session === "object" ? session.result : session;
-            const guildId = typeof session === "object" ? session.guildId : null;
-            const userAnswer = parseInt(message.content.trim(), 10);
-
-            if (userAnswer === expectedAnswer) {
-                client.captchaSessions.delete(message.author.id);
-
-                // Si on a l'ID du serveur, on attribue le rôle Membre
-                if (guildId) {
-                    const guild = client.guilds.cache.get(guildId);
-                    if (guild) {
-                        const member = await guild.members.fetch(message.author.id).catch(() => null);
-                        if (member) {
-                            const unverifiedRole = guild.roles.cache.find(r => r.name === UNVERIFIED_ROLE_NAME);
-                            const verifiedRole = guild.roles.cache.find(r => r.name === VERIFIED_ROLE_NAME);
-
-                            if (unverifiedRole) await member.roles.remove(unverifiedRole).catch(() => {});
-                            if (verifiedRole) await member.roles.add(verifiedRole).catch(() => {});
-                        }
-                    }
-                }
-
-                await message.reply("🎉 **Captcha validé avec succès !** Ton accès au serveur a été débloqué.").catch(() => {});
-            } else {
-                await message.reply("❌ **Réponse incorrecte.** Veuillez réessayer !").catch(() => {});
-            }
-        }
-        return;
-    }
-
-    // ==========================================
-    // 🔒 B. COMMANDES DE LOCKDOWN (+lock / +unlock)
+    // 🔒 A. COMMANDES DE LOCKDOWN (+lock / +unlock)
     // ==========================================
     if (message.content.startsWith("+lock") || message.content.startsWith("+unlock")) {
         return lockdownCmd(client, message);
     }
 
     // ==========================================
-    // 🚨 C. TRAITEMENT DU MODE LOCKDOWN
+    // 🚨 B. TRAITEMENT DU MODE LOCKDOWN
     // ==========================================
     if (client.isLockdown && !message.member?.permissions.has("Administrator")) {
         await message.delete().catch(() => {});
@@ -66,13 +27,13 @@ module.exports = async (client, message) => {
     }
 
     // ==========================================
-    // 🛡️ D. FILTRE ANTI-SPAM (MODULE EXTERNE)
+    // 🛡️ C. FILTRE ANTI-SPAM (MODULE EXTERNE)
     // ==========================================
     const isSpamDetected = await handleAntiSpam(client, message);
     if (isSpamDetected) return; // Si intercepté par l'Anti-Spam, on arrête l'exécution
 
     // ==========================================
-    // ⚡ E. FLOOD COMBINÉ ET SUIVI RAPIDITÉ
+    // ⚡ D. FLOOD COMBINÉ ET SUIVI RAPIDITÉ
     // ==========================================
     const userId = message.author.id;
     const now = Date.now();

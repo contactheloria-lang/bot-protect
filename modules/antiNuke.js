@@ -1,12 +1,7 @@
 const { 
     PermissionsBitField, 
     EmbedBuilder, 
-    AuditLogEvent, 
-    ActionRowBuilder, 
-    ButtonBuilder, 
-    ButtonStyle, 
-    ChannelType, 
-    PermissionFlagsBits 
+    AuditLogEvent 
 } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
@@ -16,11 +11,11 @@ const path = require("path");
 // (Remplace avec tes propres IDs)
 // ==========================================
 const CHANNELS = {
-    ANTI_RAID: "1534142396491628604",       // Vagues de raid & Comptes < 24h
-    ANTI_BOT: "1534142397670359050",        // Tentatives d'ajout de bots non autorisés
-    ANTI_LINK: "1534142400409108520",       // Liens d'invitations Discord supprimés
-    ANTI_NUKE: "1534142401818398730",       // Dépassements de quotas & Sanctions Staff
-    SANCTION_AUTO: "1534142403525742642"   // Récapitulatif global des actions auto
+    ANTI_RAID: "1532049300182269982",       // Vagues de raid
+    ANTI_BOT: "1532049330544972026",        // Tentatives d'ajout de bots non autorisés
+    ANTI_LINK: "1532049395225333821",       // Liens d'invitations Discord supprimés
+    ANTI_NUKE: "1532049414925979798",       // Dépassements de quotas & Sanctions Staff
+    SANCTION_AUTO: "1532049436631633990"   // Récapitulatif global des actions auto
 };
 
 // --- BASE DE DONNÉES ANTI-NUKE ---
@@ -55,8 +50,6 @@ const saveDb = () => {
 };
 
 // Bases de données temporaires en mémoire
-const verificationSessions = new Map();     // userId -> { answer, channelId, tenMinTimer, dayTimer }
-const dmVerificationSessions = new Map();   // userId -> { answer, guildId }
 const actionTrackers = new Map();           // trackingKey -> [timestamps]
 const quarantineCache = new Map();          // userId -> [roleIds]
 
@@ -67,12 +60,10 @@ let recentJoins = [];
 let raidAlertOn = false;
 
 const OWNER_ID = process.env.OWNER_ID || "1431661348218998948";
-const UNVERIFIED_ROLE_NAME = "Non-Vérifié";
-const VERIFIED_ROLE_NAME = "Membre";
 
 module.exports = (client) => {
 
-    console.log("[🛡️ AKORA FORTRESS] Système Anti-Nuke, Anti-Link & Verification prêt.");
+    console.log("[🛡️ TEAM HELORIA FORTRESS] Système Anti-Nuke & Anti-Link prêt.");
 
     // --- FONCTION UTILITAIRE : ENVOI DE LOGS ULTRA-DÉTAILLÉS ---
     const sendLog = async (chanId, embed) => {
@@ -121,7 +112,7 @@ module.exports = (client) => {
                 { name: "⚠️ Motif de la Sanction", value: `\`${reason}\``, inline: false },
                 { name: "📦 Quarantaine", value: `\`${rolesToStrip.size}\` rôle(s) sauvegardé(s) en mémoire.`, inline: false }
             )
-            .setFooter({ text: "Akora Fortress Security", iconURL: client.user.displayAvatarURL() })
+            .setFooter({ text: "Team HeLoRiA Fortress Security", iconURL: client.user.displayAvatarURL() })
             .setTimestamp();
 
         sendLog(CHANNELS.ANTI_NUKE, criticalEmbed);
@@ -149,7 +140,7 @@ module.exports = (client) => {
     };
 
     // ==========================================
-    // 🛡️ EVENEMENTS ANTI-NUKE (SALONS, RÔLES, BANS)
+    // 🛡️ ÉVÉNEMENTS ANTI-NUKE (SALONS, RÔLES, BANS)
     // ==========================================
 
     // Anti-Mass Suppression/Création Salons
@@ -197,7 +188,7 @@ module.exports = (client) => {
             await msg.delete().catch(() => {});
 
             // 2. Avertissement temporaire dans le salon
-            const warnMsg = await msg.channel.send(`⚠️ <@${msg.author.id}>, les liens d'invitations Discord sont strictly interdits ici !`).catch(() => null);
+            const warnMsg = await msg.channel.send(`⚠️ <@${msg.author.id}>, les liens d'invitations Discord sont strictement interdits ici !`).catch(() => null);
             if (warnMsg) setTimeout(() => warnMsg.delete().catch(() => {}), 5000);
 
             // 3. Log Détaillé
@@ -214,7 +205,7 @@ module.exports = (client) => {
                     { name: "📅 Date & Heure", value: timestampFormat, inline: false },
                     { name: "💬 Contenu du Message", value: `\`\`\`${msg.content.slice(0, 1000)}\`\`\``, inline: false }
                 )
-                .setFooter({ text: "Akora Fortress Anti-Pub", iconURL: client.user.displayAvatarURL() })
+                .setFooter({ text: "Team HeLoRiA Fortress Anti-Pub", iconURL: client.user.displayAvatarURL() })
                 .setTimestamp();
 
             sendLog(CHANNELS.ANTI_LINK, linkEmbed);
@@ -222,42 +213,14 @@ module.exports = (client) => {
     });
 
     // ==========================================
-    // 👤 EVENEMENT REJOINDRE LE SERVEUR
+    // 👤 ÉVÉNEMENT REJOINDRE LE SERVEUR
     // ==========================================
     client.on("guildMemberAdd", async (member) => {
         const server = member.guild;
         const timeNow = Date.now();
         const timestampFormat = `<t:${Math.floor(timeNow / 1000)}:F>`;
 
-        // 1. Anti-Alt (< 24h)
-        const accountAgeInSeconds = (timeNow - member.user.createdTimestamp) / 1000;
-        if (accountAgeInSeconds < 86400) {
-            const altEmbedDM = new EmbedBuilder()
-                .setColor("#b71c1c")
-                .setTitle("⚠️ Accès Refusé — Protection Anti-Double Compte")
-                .setDescription(`Bonjour ${member.user.username},\n\nVotre compte Discord a été créé il y a moins de 24 heures. L'accès au serveur **${server.name}** vous est temporairement refusé.`);
-
-            await member.send({ embeds: [altEmbedDM] }).catch(() => {});
-            await member.kick("Protection Anti-Alt : Compte créé il y a < 24h.").catch(() => {});
-
-            // Log Anti-Alt
-            const altLogEmbed = new EmbedBuilder()
-                .setColor("#d32f2f")
-                .setTitle("🛡️ COMPTE EXPULSÉ (ANTI-ALT)")
-                .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
-                .addFields(
-                    { name: "👤 Membre", value: `${member.user} (\`${member.user.username}\`)`, inline: true },
-                    { name: "🆔 ID Membre", value: `\`${member.id}\``, inline: true },
-                    { name: "📅 Date de Création du compte", value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:F>`, inline: false },
-                    { name: "🕒 Expulsé le", value: timestampFormat, inline: false }
-                )
-                .setFooter({ text: "Akora Fortress Protection", iconURL: client.user.displayAvatarURL() });
-
-            sendLog(CHANNELS.ANTI_RAID, altLogEmbed);
-            return;
-        }
-
-        // 2. Anti-Bot Strict
+        // 1. Anti-Bot Strict
         if (member.user.bot && db.antiBot) {
             const logs = await server.fetchAuditLogs({ limit: 1, type: AuditLogEvent.BotAdd }).catch(() => null);
             const logEntry = logs?.entries.first();
@@ -280,7 +243,7 @@ module.exports = (client) => {
             return;
         }
 
-        // 3. Détection Vague de Raid
+        // 2. Détection Vague de Raid
         recentJoins = recentJoins.filter(t => timeNow - t < RAID_WINDOW);
         recentJoins.push(timeNow);
         if (recentJoins.length >= RAID_LIMIT && !raidAlertOn) {
@@ -290,173 +253,10 @@ module.exports = (client) => {
                 .setTitle("🚨 ALERTE RAID DÉTECTÉE")
                 .setDescription(`Afflux massif de **${recentJoins.length} nouveaux membres** en moins de 30 secondes.`)
                 .addFields({ name: "📅 Date & Heure", value: timestampFormat, inline: false })
-                .setFooter({ text: "Akora Fortress Anti-Raid", iconURL: client.user.displayAvatarURL() });
+                .setFooter({ text: "Team HeLoRiA Fortress Anti-Raid", iconURL: client.user.displayAvatarURL() });
 
             sendLog(CHANNELS.ANTI_RAID, raidEmbed);
             setTimeout(() => { raidAlertOn = false; }, 60000); // Réinitialisation de l'alerte après 1 min
-        }
-
-        // 4. Attribution rôle Non-Vérifié & Création Salon Captcha
-        let unverifiedRole = server.roles.cache.find(r => r.name === UNVERIFIED_ROLE_NAME);
-        if (unverifiedRole) await member.roles.add(unverifiedRole).catch(() => {});
-
-        const num1 = Math.floor(Math.random() * 9) + 1;
-        const num2 = Math.floor(Math.random() * 9) + 1;
-        const answer = num1 + num2;
-
-        const verifyChannel = await server.channels.create({
-            name: `verify-${member.user.username}`,
-            type: ChannelType.GuildText,
-            permissionOverwrites: [
-                { id: server.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-                { id: member.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
-            ]
-        }).catch(() => null);
-
-        if (verifyChannel) {
-            // Timer 10 minutes (Rappel)
-            const tenMinTimeout = setTimeout(async () => {
-                if (verificationSessions.has(member.id)) {
-                    await verifyChannel.send({
-                        content: `🔔 <@${member.id}>, n'oubliez pas de compléter le calcul ci-dessus sous **24 heures**, sinon ce salon sera supprimé.`
-                    }).catch(() => {});
-                }
-            }, 600000);
-
-            // Timer 24h (Fermeture du salon & envoi DM dernière chance)
-            const twentyFourHourTimeout = setTimeout(async () => {
-                if (verificationSessions.has(member.id)) {
-                    verificationSessions.delete(member.id);
-                    await verifyChannel.delete().catch(() => {});
-
-                    const dmNum1 = Math.floor(Math.random() * 9) + 1;
-                    const dmNum2 = Math.floor(Math.random() * 9) + 1;
-                    const dmAnswer = dmNum1 + dmNum2;
-
-                    dmVerificationSessions.set(member.id, { answer: dmAnswer, guildId: server.id });
-
-                    const lastChanceEmbed = new EmbedBuilder()
-                        .setColor("#ef6c00")
-                        .setTitle("⚠️ DERNIÈRE CHANCE DE VÉRIFICATION")
-                        .setDescription(`Votre salon temporaire a été fermé.\n\nRépondez directement à ce message privé avec le résultat de :\n👉 **${dmNum1} + ${dmNum2} = ?**`);
-
-                    await member.send({ embeds: [lastChanceEmbed] }).catch(() => {});
-                }
-            }, 86400000);
-
-            verificationSessions.set(member.id, { 
-                answer, 
-                channelId: verifyChannel.id, 
-                tenMinTimer: tenMinTimeout, 
-                dayTimer: twentyFourHourTimeout 
-            });
-
-            const bypassButton = new ButtonBuilder()
-                .setCustomId(`override_verify_${member.id}`)
-                .setLabel("Valider Manuellement (Staff)")
-                .setStyle(ButtonStyle.Danger);
-
-            const row = new ActionRowBuilder().addComponents(bypassButton);
-
-            const welcomeEmbed = new EmbedBuilder()
-                .setColor("#2b2d31")
-                .setTitle("🔒 Procédure de Vérification")
-                .setDescription(`Bienvenue ${member} !\n\nPour accéder au serveur, veuillez répondre avec le résultat de ce calcul dans ce salon :\n👉 **${num1} + ${num2} = ?**`);
-
-            await verifyChannel.send({ content: `${member}`, embeds: [welcomeEmbed], components: [row] });
-        }
-    });
-
-    // ==========================================
-    // ⚙️ RÉPONSES AUX CALCULS ET BOUTONS STAFF
-    // ==========================================
-
-    client.on("interactionCreate", async (interaction) => {
-        if (!interaction.isButton()) return;
-
-        // Validation manuelle par le Staff
-        if (interaction.customId.startsWith("override_verify_")) {
-            if (!isImmune(interaction.user.id, interaction.guild)) {
-                return interaction.reply({ content: "❌ Seul un administrateur autorisé peut valider manuellement.", ephemeral: true });
-            }
-
-            const targetUserId = interaction.customId.replace("override_verify_", "");
-            const session = verificationSessions.get(targetUserId);
-
-            if (session) {
-                clearTimeout(session.tenMinTimer);
-                clearTimeout(session.dayTimer);
-                verificationSessions.delete(targetUserId);
-            }
-
-            const targetMember = await interaction.guild.members.fetch(targetUserId).catch(() => null);
-            if (targetMember) {
-                const unverifiedRole = interaction.guild.roles.cache.find(r => r.name === UNVERIFIED_ROLE_NAME);
-                const verifiedRole = interaction.guild.roles.cache.find(r => r.name === VERIFIED_ROLE_NAME);
-
-                if (unverifiedRole) await targetMember.roles.remove(unverifiedRole).catch(() => {});
-                if (verifiedRole) await targetMember.roles.add(verifiedRole).catch(() => {});
-            }
-
-            await interaction.reply({ content: `✅ Membre <@${targetUserId}> validé manuellement par ${interaction.user}.` });
-            setTimeout(() => interaction.channel.delete().catch(() => {}), 2000);
-        }
-    });
-
-    client.on("messageCreate", async (msg) => {
-        if (msg.author.bot) return;
-
-        // Réponse en MP (Dernière chance)
-        if (!msg.guild) {
-            if (dmVerificationSessions.has(msg.author.id)) {
-                const dmSession = dmVerificationSessions.get(msg.author.id);
-                const userAnswer = parseInt(msg.content.trim(), 10);
-
-                if (userAnswer === dmSession.answer) {
-                    const guild = client.guilds.cache.get(dmSession.guildId);
-                    if (guild) {
-                        const member = await guild.members.fetch(msg.author.id).catch(() => null);
-                        if (member) {
-                            const unverifiedRole = guild.roles.cache.find(r => r.name === UNVERIFIED_ROLE_NAME);
-                            const verifiedRole = guild.roles.cache.find(r => r.name === VERIFIED_ROLE_NAME);
-
-                            if (unverifiedRole) await member.roles.remove(unverifiedRole).catch(() => {});
-                            if (verifiedRole) await member.roles.add(verifiedRole).catch(() => {});
-
-                            dmVerificationSessions.delete(msg.author.id);
-                            return msg.reply(`🎉 Bravo ! Votre accès au serveur **${guild.name}** a été validé.`);
-                        }
-                    }
-                } else {
-                    return msg.reply("❌ Réponse incorrecte. Veuillez réessayer !");
-                }
-            }
-            return;
-        }
-
-        // Réponse dans le Salon Privé Captcha
-        if (verificationSessions.has(msg.author.id)) {
-            const session = verificationSessions.get(msg.author.id);
-            if (msg.channel.id === session.channelId) {
-
-                const userAnswer = parseInt(msg.content.trim(), 10);
-                if (userAnswer === session.answer) {
-                    clearTimeout(session.tenMinTimer);
-                    clearTimeout(session.dayTimer);
-
-                    const unverifiedRole = msg.guild.roles.cache.find(r => r.name === UNVERIFIED_ROLE_NAME);
-                    const verifiedRole = msg.guild.roles.cache.find(r => r.name === VERIFIED_ROLE_NAME);
-
-                    if (unverifiedRole) await msg.member.roles.remove(unverifiedRole).catch(() => {});
-                    if (verifiedRole) await msg.member.roles.add(verifiedRole).catch(() => {});
-
-                    verificationSessions.delete(msg.author.id);
-                    await msg.channel.send("✅ Calcul exact ! Accès débloqué.");
-                    setTimeout(() => msg.channel.delete().catch(() => {}), 2000);
-                } else {
-                    await msg.channel.send("❌ Calcul incorrect. Réessayez !");
-                }
-            }
         }
     });
 };
