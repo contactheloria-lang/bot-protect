@@ -100,7 +100,7 @@ module.exports = async function handleAntiSpam(client, message) {
 
     // --- RÈGLE 6 : Anti-Mass Emoji (> 7 émojis) ---
     if (!isViolation) {
-        const emojiRegex = /(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])/g;
+        const emojiRegex = /\p{Extended_Pictographic}/gu;
         const emojiCount = (content.match(emojiRegex) || []).length;
         if (emojiCount > 7) {
             isViolation = true;
