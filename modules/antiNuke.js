@@ -1,262 +1,151 @@
-const { 
-    PermissionsBitField, 
-    EmbedBuilder, 
-    AuditLogEvent 
-} = require("discord.js");
+const { EmbedBuilder, AuditLogEvent, PermissionsBitField } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 
-// ==========================================
-// 📌 CONFIGURATION DES SALONS DE LOGS
-// (Remplace avec tes propres IDs)
-// ==========================================
-const CHANNELS = {
-    ANTI_RAID: "1532049300182269982",       // Vagues de raid
-    ANTI_BOT: "1532049330544972026",        // Tentatives d'ajout de bots non autorisés
-    ANTI_LINK: "1532049395225333821",       // Liens d'invitations Discord supprimés
-    ANTI_NUKE: "1532049414925979798",       // Dépassements de quotas & Sanctions Staff
-    SANCTION_AUTO: "1532049436631633990"   // Récapitulatif global des actions auto
-};
+const CONFIG_PATH = path.join(__dirname, "../data/fortress_config.json");
 
-// --- BASE DE DONNÉES ANTI-NUKE ---
-const DB_PATH = path.join(__dirname, "../data", "fortress_antispam_db.json");
+// Buffers en mémoire pour le suivi des quotas et des sauvegardes
+const actionTrackers = new Map(); // trackingKey -> [timestamps]
+const quarantineCache = new Map(); // userId -> [roleIds]
 
-let db = { 
-    channels: {}, 
-    roles: {}, 
-    bunkerActive: false, 
-    antiBot: true, 
-    antiWebhook: true, 
-    whitelist: [],
-    limits: { channel: 3, role: 3, ban: 3 } // Limite stricte : 3 actions par minute
-};
+const WINDOW_TIME = 60000; // Fenêtre d'analyse de 1 minute
 
-if (fs.existsSync(DB_PATH)) {
+function getConfig() {
+    if (!fs.existsSync(CONFIG_PATH)) return null;
     try {
-        db = JSON.parse(fs.readFileSync(DB_PATH, "utf-8"));
-        if (!db.whitelist) db.whitelist = [];
-        if (!db.limits) db.limits = { channel: 3, role: 3, ban: 3 };
-    } catch (e) {
-        console.log("[Security] Erreur de lecture DB, réinitialisation.");
+        return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+    } catch {
+        return null;
     }
 }
 
-const saveDb = () => {
-    try {
-        fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), "utf-8");
-    } catch (e) {
-        console.log("[Security] Erreur de sauvegarde DB.");
+function isImmune(userId, guild, config) {
+    if (!config) return false;
+    if (userId === config.ownerId || (guild && userId === guild.ownerId) || userId === guild.client.user.id) return true;
+    return config.whitelist?.includes(userId) || false;
+}
+
+/**
+ * Exécute la mise en quarantaine immédiate d'un membre du Staff fautif
+ */
+async function executeQuarantine(guild, userId, reason, config) {
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (!member) return;
+
+    // Sauvegarde des rôles pour restauration ultérieure en cas de fausse alerte
+    const rolesToStrip = member.roles.cache.filter(r => r.id !== guild.roles.everyone.id);
+    quarantineCache.set(userId, {
+        roles: rolesToStrip.map(r => r.id),
+        timestamp: Date.now()
+    });
+
+    // Retrait immédiat de tous les rôles administratifs/modération
+    await member.roles.remove(rolesToStrip, `[ANTI-NUKE] ${reason}`).catch(() => {});
+
+    // Bannissement si c'est un bot malveillant ou expulsion/sourdine d'urgence si c'est un utilisateur
+    if (member.user.bot) {
+        await member.ban({ reason: `[ANTI-NUKE BOT] ${reason}` }).catch(() => {});
+    } else {
+        await member.timeout(24 * 60 * 60 * 1000, `[ANTI-NUKE QUARANTAINE] ${reason}`).catch(() => {});
     }
-};
 
-// Bases de données temporaires en mémoire
-const actionTrackers = new Map();           // trackingKey -> [timestamps]
-const quarantineCache = new Map();          // userId -> [roleIds]
+    // Alerte Logs
+    const logEmbed = new EmbedBuilder()
+        .setColor("#B71C1C")
+        .setTitle("🚨 SANCTION ANTI-NUKE ET QUARANTAINE")
+        .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
+        .addFields(
+            { name: "👤 Membre Sanctionné", value: `${member.user.tag} (\`${userId}\`)`, inline: true },
+            { name: "⚠️ Motif de la Sanction", value: `\`${reason}\``, inline: false },
+            { name: "📦 Quarantaine", value: `\`${rolesToStrip.size}\` rôle(s) retiré(s) et sauvegardé(s).`, inline: false }
+        )
+        .setTimestamp();
 
-const WINDOW_TIME = 60000; // 1 minute (60 000 ms)
-const RAID_WINDOW = 30000;  // 30 secondes
-const RAID_LIMIT = 5;       // 5 arrivées en 30s = Alerte Raid     
-let recentJoins = [];
-let raidAlertOn = false;
+    const logChan = await guild.client.channels.fetch(config.channels?.logsAntiNuke).catch(() => null);
+    if (logChan) logChan.send({ embeds: [logEmbed] });
+}
 
-const OWNER_ID = process.env.OWNER_ID || "1431661348218998948";
+/**
+ * Traque les quotas d'actions (Channels, Roles, Bans)
+ */
+async function trackQuota(guild, executorId, actionType, maxAllowed, actionLabel, config) {
+    if (isImmune(executorId, guild, config)) return false;
 
-module.exports = (client) => {
+    const now = Date.now();
+    const trackingKey = `${executorId}_${actionType}`;
 
-    console.log("[🛡️ TEAM HELORIA FORTRESS] Système Anti-Nuke & Anti-Link prêt.");
+    let timestamps = (actionTrackers.get(trackingKey) || []).filter(t => now - t < WINDOW_TIME);
+    timestamps.push(now);
+    actionTrackers.set(trackingKey, timestamps);
 
-    // --- FONCTION UTILITAIRE : ENVOI DE LOGS ULTRA-DÉTAILLÉS ---
-    const sendLog = async (chanId, embed) => {
-        if (!chanId) return;
-        const chan = await client.channels.fetch(chanId).catch(() => null);
-        if (chan) chan.send({ embeds: [embed] }).catch(() => {});
-    };
+    if (timestamps.length > maxAllowed) {
+        await executeQuarantine(
+            guild, 
+            executorId, 
+            `Dépassement de quota : ${actionLabel} (${timestamps.length}/${maxAllowed} par min)`,
+            config
+        );
+        return true;
+    }
+    return false;
+}
 
-    const isImmune = (userId, guild) => {
-        if (userId === OWNER_ID || userId === guild.ownerId || userId === client.user.id) return true;
-        return db.whitelist.includes(userId);
-    };
+/**
+ * Initialise la surveillance des événements Anti-Nuke
+ */
+function initAntiNuke(client) {
+    const config = getConfig();
+    if (!config) return;
 
-    // --- SYSTÈME DE QUARANTAINE ET SANCTION STAFF ---
-    const executeStaffSanction = async (guild, userId, reason) => {
-        const member = await guild.members.fetch(userId).catch(() => null);
-        if (!member) return;
+    const limits = config.antiNukeLimits || { channelDelete: 3, roleDelete: 3, memberBan: 3 };
 
-        // Si c'est un bot malveillant
-        if (member.user.bot) {
-            await member.ban({ reason: `[ANTI-NUKE] ${reason}` }).catch(() => {});
-            return;
-        }
-
-        // 1. Sauvegarde en Quarantaine (Restauration des rôles en cas de fausse alerte)
-        const rolesToStrip = member.roles.cache.filter(r => r.id !== guild.roles.everyone.id);
-        quarantineCache.set(userId, {
-            roles: rolesToStrip.map(r => r.id),
-            timestamp: Date.now()
-        });
-
-        // 2. Expulsion/Bannissement du Staff fautif
-        await member.ban({ reason: `[ANTI-NUKE QUOTA] ${reason}` }).catch(() => {});
-
-        // 3. Log Ultra-Détaillé
-        const timestampFormat = `<t:${Math.floor(Date.now() / 1000)}:F> (<t:${Math.floor(Date.now() / 1000)}:R>)`;
-        
-        const criticalEmbed = new EmbedBuilder()
-            .setColor("#b71c1c")
-            .setTitle("🚨 SANCTION ANTI-NUKE DÉCLENCHÉE")
-            .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
-            .addFields(
-                { name: "👤 Membre Sanctionné", value: `${member.user} (\`${member.user.username}\`)`, inline: true },
-                { name: "🆔 ID du Membre", value: `\`${userId}\``, inline: true },
-                { name: "📅 Date & Heure", value: timestampFormat, inline: false },
-                { name: "⚠️ Motif de la Sanction", value: `\`${reason}\``, inline: false },
-                { name: "📦 Quarantaine", value: `\`${rolesToStrip.size}\` rôle(s) sauvegardé(s) en mémoire.`, inline: false }
-            )
-            .setFooter({ text: "Team HeLoRiA Fortress Security", iconURL: client.user.displayAvatarURL() })
-            .setTimestamp();
-
-        sendLog(CHANNELS.ANTI_NUKE, criticalEmbed);
-        sendLog(CHANNELS.SANCTION_AUTO, criticalEmbed);
-    };
-
-    // --- GESTION DES QUOTAS STAFF (3 ACTIONS / 1 MIN) ---
-    const trackActionQuota = async (guild, userId, type, limitValue, actionLabel) => {
-        if (isImmune(userId, guild)) return false;
-
-        const now = Date.now();
-        const trackingKey = `${userId}_${type}`;
-
-        if (!actionTrackers.has(trackingKey)) actionTrackers.set(trackingKey, []);
-        
-        let timestamps = actionTrackers.get(trackingKey).filter(t => now - t < WINDOW_TIME);
-        timestamps.push(now);
-        actionTrackers.set(trackingKey, timestamps);
-
-        if (timestamps.length > limitValue) {
-            await executeStaffSanction(guild, userId, `Dépassement du quota de ${actionLabel} (${timestamps.length}/${limitValue} par min)`);
-            return true;
-        }
-        return false;
-    };
-
-    // ==========================================
-    // 🛡️ ÉVÉNEMENTS ANTI-NUKE (SALONS, RÔLES, BANS)
-    // ==========================================
-
-    // Anti-Mass Suppression/Création Salons
+    // 1. Détection suppression de salons
     client.on("channelDelete", async (channel) => {
         if (!channel.guild) return;
         const logs = await channel.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.ChannelDelete }).catch(() => null);
         const entry = logs?.entries.first();
         if (entry && entry.executor) {
-            await trackActionQuota(channel.guild, entry.executor.id, "channel_delete", db.limits.channel, "Suppression de salons");
+            await trackQuota(channel.guild, entry.executor.id, "channel_delete", limits.channelDelete, "Suppression de salons", config);
         }
     });
 
-    // Anti-Mass Suppression Rôles
+    // 2. Détection suppression de rôles
     client.on("roleDelete", async (role) => {
+        if (!role.guild) return;
         const logs = await role.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.RoleDelete }).catch(() => null);
         const entry = logs?.entries.first();
         if (entry && entry.executor) {
-            await trackActionQuota(role.guild, entry.executor.id, "role_delete", db.limits.role, "Suppression de rôles");
+            await trackQuota(role.guild, entry.executor.id, "role_delete", limits.roleDelete, "Suppression de rôles", config);
         }
     });
 
-    // Anti-Mass Ban
+    // 3. Détection bannissements massifs
     client.on("guildBanAdd", async (ban) => {
         const logs = await ban.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.MemberBanAdd }).catch(() => null);
         const entry = logs?.entries.first();
         if (entry && entry.executor) {
-            await trackActionQuota(ban.guild, entry.executor.id, "member_ban", db.limits.ban, "Bannissements de membres");
+            await trackQuota(ban.guild, entry.executor.id, "member_ban", limits.memberBan, "Bannissements de membres", config);
         }
     });
 
-    // ==========================================
-    // 🔗 ÉVÉNEMENT ANTI-LINK / ANTI-PUB
-    // ==========================================
-    client.on("messageCreate", async (msg) => {
-        if (!msg.guild || msg.author.bot) return;
+    // 4. Détection ajout de permissions dangereuses sur un rôle
+    client.on("roleUpdate", async (oldRole, newRole) => {
+        if (!newRole.guild) return;
+        const dangerousPermissions = [PermissionsBitField.Flags.Administrator, PermissionsBitField.Flags.ManageRoles];
+        
+        const hadDangerous = dangerousPermissions.some(perm => oldRole.permissions.has(perm));
+        const hasDangerous = dangerousPermissions.some(perm => newRole.permissions.has(perm));
 
-        // Détection des liens d'invitation Discord
-        const discordInviteRegex = /(discord\.(gg|io|me|li)|discordapp\.com\/invite|discord\.com\/invite)\/([a-zA-Z0-9\-]+)/gi;
+        if (!hadDangerous && hasDangerous) {
+            const logs = await newRole.guild.fetchAuditLogs({ limit: 1, type: AuditLogEvent.RoleUpdate }).catch(() => null);
+            const entry = logs?.entries.first();
 
-        if (discordInviteRegex.test(msg.content)) {
-            // Si le membre est immunisé/whitelist, on laisse passer
-            if (isImmune(msg.author.id, msg.guild)) return;
-
-            // 1. Suppression du message
-            await msg.delete().catch(() => {});
-
-            // 2. Avertissement temporaire dans le salon
-            const warnMsg = await msg.channel.send(`⚠️ <@${msg.author.id}>, les liens d'invitations Discord sont strictement interdits ici !`).catch(() => null);
-            if (warnMsg) setTimeout(() => warnMsg.delete().catch(() => {}), 5000);
-
-            // 3. Log Détaillé
-            const timestampFormat = `<t:${Math.floor(Date.now() / 1000)}:F>`;
-            
-            const linkEmbed = new EmbedBuilder()
-                .setColor("#ff9800")
-                .setTitle("🔗 LIEN DE PUB DÉTECTÉ ET SUPPRIMÉ")
-                .setThumbnail(msg.author.displayAvatarURL({ dynamic: true }))
-                .addFields(
-                    { name: "👤 Auteur", value: `${msg.author} (\`${msg.author.username}\`)`, inline: true },
-                    { name: "🆔 ID Auteur", value: `\`${msg.author.id}\``, inline: true },
-                    { name: "📍 Salon", value: `${msg.channel} (\`${msg.channel.id}\`)`, inline: true },
-                    { name: "📅 Date & Heure", value: timestampFormat, inline: false },
-                    { name: "💬 Contenu du Message", value: `\`\`\`${msg.content.slice(0, 1000)}\`\`\``, inline: false }
-                )
-                .setFooter({ text: "Team HeLoRiA Fortress Anti-Pub", iconURL: client.user.displayAvatarURL() })
-                .setTimestamp();
-
-            sendLog(CHANNELS.ANTI_LINK, linkEmbed);
-        }
-    });
-
-    // ==========================================
-    // 👤 ÉVÉNEMENT REJOINDRE LE SERVEUR
-    // ==========================================
-    client.on("guildMemberAdd", async (member) => {
-        const server = member.guild;
-        const timeNow = Date.now();
-        const timestampFormat = `<t:${Math.floor(timeNow / 1000)}:F>`;
-
-        // 1. Anti-Bot Strict
-        if (member.user.bot && db.antiBot) {
-            const logs = await server.fetchAuditLogs({ limit: 1, type: AuditLogEvent.BotAdd }).catch(() => null);
-            const logEntry = logs?.entries.first();
-            
-            if (logEntry && !isImmune(logEntry.executor.id, server)) {
-                await member.ban({ reason: "Bot non autorisé" }).catch(() => {});
-                await executeStaffSanction(server, logEntry.executor.id, `Invitation d'un bot non autorisé : ${member.user.tag}`);
-
-                const botLogEmbed = new EmbedBuilder()
-                    .setColor("#b71c1c")
-                    .setTitle("🤖 TENTATIVE D'INVITATION DE BOT BLOQUÉE")
-                    .addFields(
-                        { name: "🤖 Bot Banni", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
-                        { name: "👤 Invité par", value: `<@${logEntry.executor.id}> (\`${logEntry.executor.id}\`)`, inline: true },
-                        { name: "📅 Date & Heure", value: timestampFormat, inline: false }
-                    );
-
-                sendLog(CHANNELS.ANTI_BOT, botLogEmbed);
+            if (entry && entry.executor && !isImmune(entry.executor.id, newRole.guild, config)) {
+                await newRole.setPermissions(oldRole.permissions, "[ANTI-NUKE] Permission dangereuse révoquée.").catch(() => {});
+                await executeQuarantine(newRole.guild, entry.executor.id, `Ajout de permissions dangereuses sur le rôle ${newRole.name}`, config);
             }
-            return;
-        }
-
-        // 2. Détection Vague de Raid
-        recentJoins = recentJoins.filter(t => timeNow - t < RAID_WINDOW);
-        recentJoins.push(timeNow);
-        if (recentJoins.length >= RAID_LIMIT && !raidAlertOn) {
-            raidAlertOn = true;
-            const raidEmbed = new EmbedBuilder()
-                .setColor("#ef6c00")
-                .setTitle("🚨 ALERTE RAID DÉTECTÉE")
-                .setDescription(`Afflux massif de **${recentJoins.length} nouveaux membres** en moins de 30 secondes.`)
-                .addFields({ name: "📅 Date & Heure", value: timestampFormat, inline: false })
-                .setFooter({ text: "Team HeLoRiA Fortress Anti-Raid", iconURL: client.user.displayAvatarURL() });
-
-            sendLog(CHANNELS.ANTI_RAID, raidEmbed);
-            setTimeout(() => { raidAlertOn = false; }, 60000); // Réinitialisation de l'alerte après 1 min
         }
     });
-};
+}
+
+module.exports = { initAntiNuke };
