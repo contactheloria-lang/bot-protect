@@ -1,164 +1,286 @@
 const { 
     EmbedBuilder, 
-    ChannelType, 
-    PermissionFlagsBits 
+    ActionRowBuilder, 
+    ButtonBuilder, 
+    ButtonStyle, 
+    PermissionsBitField, 
+    ChannelType 
 } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 
+const DATA_PATH = path.join(__dirname, "../data/modmail_data.json");
 const CONFIG_PATH = path.join(__dirname, "../data/fortress_config.json");
 
-// Buffer en mémoire pour suivre les tickets actifs (userId -> channelId)
-const activeTickets = new Map();
+// Chargement et sauvegarde des états de tickets
+function loadData() {
+    if (!fs.existsSync(DATA_PATH)) return { tickets: [], blacklist: [] };
+    try { return JSON.parse(fs.readFileSync(DATA_PATH, "utf-8")); } 
+    catch { return { tickets: [], blacklist: [] }; }
+}
+
+function saveData(data) {
+    fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2));
+}
 
 function getConfig() {
     if (!fs.existsSync(CONFIG_PATH)) return null;
-    try {
-        return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
-    } catch {
-        return null;
-    }
+    try { return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")); } 
+    catch { return null; }
 }
 
 /**
- * Gère la réception des messages privés et le transfert vers le Staff
+ * 01-44 : Réception d'un DM et gestion/création du ticket ModMail
  */
-async function handleModMail(client, message) {
-    // Ne traiter que les MP des utilisateurs (pas les bots, ni les salons de serveurs)
-    if (message.guild || message.author.bot) return;
+async function handleDirectMessage(client, message) {
+    if (message.author.bot || message.guild) return;
 
+    const data = loadData();
     const config = getConfig();
-    if (!config || !config.modMail?.enabled) return;
+    if (!config || !config.guildId) return;
 
-    const guild = await client.guilds.fetch(config.modMail.guildId).catch(() => null);
+    if (data.blacklist.includes(message.author.id)) {
+        return message.reply("❌ Vous n'êtes pas autorisé à contacter le support.").catch(() => {});
+    }
+
+    const guild = await client.guilds.fetch(config.guildId).catch(() => null);
     if (!guild) return;
 
-    const userId = message.author.id;
-    let channelId = activeTickets.get(userId);
-    let mailChannel = channelId ? await guild.channels.fetch(channelId).catch(() => null) : null;
+    const ownerId = guild.ownerId;
+    let ticket = data.tickets.find(t => t.userId === message.author.id && t.status === "OPEN");
 
-    // 1. Si aucun ticket n'est ouvert, en créer un nouveau
-    if (!mailChannel) {
-        const category = config.modMail.categoryId 
-            ? await guild.channels.fetch(config.modMail.categoryId).catch(() => null) 
-            : null;
+    // Création instantanée du ticket si aucun ticket actif
+    if (!ticket) {
+        let category = guild.channels.cache.get(config.modmailCategoryId);
+        if (!category) {
+            category = await guild.channels.create({
+                name: "📁 MODMAIL / CONTACT",
+                type: ChannelType.GuildCategory,
+                permissionOverwrites: [
+                    { id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] }
+                ]
+            }).catch(() => null);
+            if (category && config) config.modmailCategoryId = category.id;
+        }
 
-        mailChannel = await guild.channels.create({
-            name: `ticket-${message.author.username}`,
+        // Création du salon privé avec accès restrictif (Propriétaire uniquement)
+        const channelName = `ticket-${message.author.username.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+        const ticketChannel = await guild.channels.create({
+            name: channelName,
             type: ChannelType.GuildText,
             parent: category ? category.id : null,
-            topic: `Ticket ModMail de ${message.author.tag} (ID: ${userId})`,
             permissionOverwrites: [
-                {
-                    id: guild.roles.everyone.id,
-                    deny: [PermissionFlagsBits.ViewChannel]
-                },
-                {
-                    id: config.modMail.staffRoleId || guild.roles.everyone.id,
-                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory]
+                { id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+                { 
+                    id: ownerId, 
+                    allow: [
+                        PermissionsBitField.Flags.ViewChannel, 
+                        PermissionsBitField.Flags.SendMessages, 
+                        PermissionsBitField.Flags.AttachFiles
+                    ] 
                 }
             ]
         }).catch(() => null);
 
-        if (!mailChannel) {
-            return message.reply("❌ Une erreur est survenue lors de l'ouverture de votre ticket support.");
+        if (!ticketChannel) {
+            return message.reply("❌ Impossible d'ouvrir un ticket actuellement. Réessayez plus tard.").catch(() => {});
         }
 
-        activeTickets.set(userId, mailChannel.id);
+        ticket = {
+            id: `TCK-${Date.now().toString().slice(-6)}`,
+            userId: message.author.id,
+            channelId: ticketChannel.id,
+            status: "OPEN",
+            createdAt: new Date().toISOString(),
+            lastActivity: new Date().toISOString()
+        };
+        data.tickets.push(ticket);
+        saveData(data);
 
-        // Notification d'ouverture dans le nouveau salon Staff
-        const initEmbed = new EmbedBuilder()
-            .setColor("#2196F3")
-            .setTitle("📩 NOUVEAU TICKET MODMAIL")
-            .setThumbnail(message.author.displayAvatarURL({ dynamic: true }))
+        // Envoi du message automatique d'accueil au membre
+        const welcomeEmbed = new EmbedBuilder()
+            .setColor("#2B2D31")
+            .setTitle("Dossier de contact ouvert")
+            .setDescription(
+                "Votre message a bien été transmis. " +
+                "Ce dossier est strictement confidentiel et accessible uniquement par le propriétaire du serveur. " +
+                "Un délai de réponse peut être nécessaire."
+            );
+        await message.author.send({ embeds: [welcomeEmbed] }).catch(() => {});
+
+        // Notification du ticket dans le salon privé du propriétaire
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`modmail_close_${ticket.id}`)
+                .setLabel("Fermer le ticket")
+                .setStyle(ButtonStyle.Danger)
+        );
+
+        const infoEmbed = new EmbedBuilder()
+            .setColor("#5865F2")
+            .setTitle(`🛡️ DOSSIER DE CONTACT : ${ticket.id}`)
             .addFields(
-                { name: "👤 Membre", value: `${message.author} (\`${userId}\`)`, inline: true },
-                { name: "📅 Compte créé le", value: `<t:${Math.floor(message.author.createdTimestamp / 1000)}:R>`, inline: true }
+                { name: "Membre", value: `${message.author.tag} (\`${message.author.id}\`)`, inline: true },
+                { name: "Création du compte", value: `<t:${Math.floor(message.author.createdTimestamp / 1000)}:R>`, inline: true }
             )
-            .setFooter({ text: "Utilisez la commande !reply pour répondre au membre." })
             .setTimestamp();
 
-        await mailChannel.send({ embeds: [initEmbed] });
-        await message.reply("✅ Votre message a été transmis à l'équipe de modération. Un modérateur vous répondra sous peu.");
+        await ticketChannel.send({ content: `<@${ownerId}>`, embeds: [infoEmbed], components: [row] }).catch(() => {});
     }
 
-    // 2. Transférer le message du membre vers le salon du Staff
-    const userEmbed = new EmbedBuilder()
-        .setColor("#4CAF50")
-        .setAuthor({ name: message.author.tag, iconURL: message.author.displayAvatarURL() })
-        .setDescription(message.content.length > 0 ? message.content : "*[Aucun texte]*")
-        .setTimestamp();
+    // 11-24 : Transmission du message au salon du ticket
+    const ticketChannel = guild.channels.cache.get(ticket.channelId);
+    if (ticketChannel) {
+        const files = message.attachments.map(a => a.url);
+        const forwardEmbed = new EmbedBuilder()
+            .setColor("#00FF00")
+            .setAuthor({ name: message.author.tag, iconURL: message.author.displayAvatarURL() })
+            .setDescription(message.content || "*[Aucun texte]*")
+            .setTimestamp();
 
-    // Gestion des pièces jointes / images
-    if (message.attachments.size > 0) {
-        const attachment = message.attachments.first();
-        userEmbed.setImage(attachment.url);
+        await ticketChannel.send({ embeds: [forwardEmbed], files }).catch(() => {});
+        
+        ticket.lastActivity = new Date().toISOString();
+        saveData(data);
+        await message.react("✅").catch(() => {});
     }
-
-    await mailChannel.send({ embeds: [userEmbed] });
-    await message.react("✅").catch(() => {});
 }
 
 /**
- * Traitement des commandes Staff dans le salon du ticket (!reply / !close)
+ * 64-72 : Transmettre les messages du salon privé vers le membre en DM
  */
-async function handleStaffCommands(client, message) {
-    if (!message.guild || message.author.bot) return;
+async function handleChannelMessage(client, message) {
+    if (message.author.bot || !message.guild || message.content.startsWith("!")) return;
 
-    const config = getConfig();
-    if (!config || !config.modMail?.enabled) return;
+    const data = loadData();
+    const ticket = data.tickets.find(t => t.channelId === message.channel.id && t.status === "OPEN");
+    if (!ticket) return;
 
-    // Trouver l'ID du membre associé à ce salon
-    let targetUserId = null;
-    for (const [uId, cId] of activeTickets.entries()) {
-        if (cId === message.channel.id) {
-            targetUserId = uId;
-            break;
-        }
+    const member = await message.guild.members.fetch(ticket.userId).catch(() => null);
+    if (!member) {
+        return message.reply("⚠️ Le membre a quitté le serveur. Impossible de transmettre le message.").catch(() => {});
     }
 
-    if (!targetUserId) return;
+    const files = message.attachments.map(a => a.url);
+    const replyEmbed = new EmbedBuilder()
+        .setColor("#5865F2")
+        .setAuthor({ name: "Réponse du Propriétaire", iconURL: message.author.displayAvatarURL() })
+        .setDescription(message.content || "*[Aucun texte]*")
+        .setTimestamp();
 
-    // Commande : !reply [message]
-    if (message.content.startsWith("!reply ")) {
-        const replyText = message.content.slice(7).trim();
-        if (!replyText) return message.reply("⚠️ Veuillez spécifier un message à envoyer.");
-
-        const targetUser = await client.users.fetch(targetUserId).catch(() => null);
-        if (!targetUser) return message.reply("❌ Impossible de trouver cet utilisateur.");
-
-        const staffEmbed = new EmbedBuilder()
-            .setColor("#2196F3")
-            .setAuthor({ name: `Support - ${message.guild.name}`, iconURL: message.guild.iconURL() })
-            .setDescription(replyText)
-            .setTimestamp();
-
-        await targetUser.send({ embeds: [staffEmbed] }).then(async () => {
-            await message.react("📤");
-        }).catch(() => {
-            message.reply("❌ Impossible d'envoyer le message privé (MP fermés par l'utilisateur).");
-        });
-    }
-
-    // Commande : !close
-    if (message.content.startsWith("!close")) {
-        const targetUser = await client.users.fetch(targetUserId).catch(() => null);
-
-        if (targetUser) {
-            const closeEmbed = new EmbedBuilder()
-                .setColor("#E91E63")
-                .setTitle("🔒 Ticket Fermé")
-                .setDescription(`Votre ticket de support sur **${message.guild.name}** a été fermé par l'équipe de modération.`);
-
-            await targetUser.send({ embeds: [closeEmbed] }).catch(() => {});
-        }
-
-        activeTickets.delete(targetUserId);
-        await message.channel.send("🔒 **Fermeture du ticket dans 5 secondes...**");
-        setTimeout(() => {
-            message.channel.delete().catch(() => {});
-        }, 5000);
+    const sent = await member.send({ embeds: [replyEmbed], files }).catch(() => null);
+    if (sent) {
+        await message.react("📤").catch(() => {});
+        ticket.lastActivity = new Date().toISOString();
+        saveData(data);
+    } else {
+        await message.reply("❌ Échec de l'envoi en DM (Messages privés fermés par l'utilisateur).").catch(() => {});
     }
 }
 
-module.exports = { handleModMail, handleStaffCommands };
+/**
+ * 131-140 : Gestion des commandes préfixées (!ticket, !close, etc.)
+ */
+async function handleCommands(client, message) {
+    if (message.author.bot || !message.guild || !message.content.startsWith("!")) return;
+
+    const args = message.content.slice(1).trim().split(/ +/);
+    const command = args.shift().toLowerCase();
+    const data = loadData();
+
+    // Commandes réservées au propriétaire du serveur
+    if (message.author.id !== message.guild.ownerId) return;
+
+    // Commandes : !close ou !ticket close
+    if (command === "close" || (command === "ticket" && args[0] === "close")) {
+        const ticket = data.tickets.find(t => t.channelId === message.channel.id && t.status === "OPEN");
+        if (!ticket) return message.reply("❌ Ce salon n'est pas un ticket ModMail actif.");
+
+        await closeTicket(client, message.guild, ticket, message.author, "Fermeture manuelle par commande.");
+    }
+
+    // Commande : !reopen <ticketId>
+    if (command === "reopen" || (command === "ticket" && args[0] === "reopen")) {
+        const ticketId = args[1] || args[0];
+        const ticket = data.tickets.find(t => t.id === ticketId);
+
+        if (!ticket) return message.reply("❌ Ticket introuvable.");
+        ticket.status = "OPEN";
+        saveData(data);
+
+        return message.reply(`🔓 Le ticket **${ticket.id}** a été réouvert.`);
+    }
+
+    // Commande : !blacklist <userId>
+    if (command === "blacklist" || (command === "ticket" && args[0] === "blacklist")) {
+        const targetId = args[1] || args[0];
+        if (!targetId || data.blacklist.includes(targetId)) {
+            return message.reply("⚠️ Utilisateur invalide ou déjà dans la liste noire.");
+        }
+
+        data.blacklist.push(targetId);
+        saveData(data);
+        return message.reply(`🚫 L'utilisateur \`${targetId}\` ne peut plus ouvrir de ticket.`);
+    }
+
+    // Commande : !unblacklist <userId>
+    if (command === "unblacklist" || (command === "ticket" && args[0] === "unblacklist")) {
+        const targetId = args[1] || args[0];
+        data.blacklist = data.blacklist.filter(id => id !== targetId);
+        saveData(data);
+        return message.reply(`✅ L'utilisateur \`${targetId}\` a été retiré de la liste noire.`);
+    }
+}
+
+/**
+ * 73-84 : Procédure de fermeture d'un ticket ModMail
+ */
+async function closeTicket(client, guild, ticket, closedBy, reason = "Aucun motif spécifié") {
+    const data = loadData();
+    ticket.status = "CLOSED";
+    ticket.closedAt = new Date().toISOString();
+    ticket.closedBy = closedBy.id;
+    saveData(data);
+
+    const member = await guild.members.fetch(ticket.userId).catch(() => null);
+    if (member) {
+        const closeEmbed = new EmbedBuilder()
+            .setColor("#FF0000")
+            .setTitle("Dossier fermé")
+            .setDescription(`Votre dossier de contact **${ticket.id}** a été fermé.\nMotif : ${reason}`);
+        await member.send({ embeds: [closeEmbed] }).catch(() => {});
+    }
+
+    const channel = guild.channels.cache.get(ticket.channelId);
+    if (channel) {
+        await channel.send(`🔒 **DOSSIER FERMÉ** par ${closedBy.tag}. Suppression du salon dans 5 secondes...`).catch(() => {});
+        setTimeout(() => channel.delete().catch(() => {}), 5000);
+    }
+}
+
+/**
+ * Gestion des boutons de fermetures
+ */
+async function handleInteraction(client, interaction) {
+    if (!interaction.isButton()) return;
+
+    if (interaction.customId.startsWith("modmail_close_")) {
+        const ticketId = interaction.customId.replace("modmail_close_", "");
+        const data = loadData();
+        const ticket = data.tickets.find(t => t.id === ticketId);
+
+        if (!ticket) {
+            return interaction.reply({ content: "❌ Ticket introuvable.", ephemeral: true });
+        }
+
+        await interaction.reply({ content: "🔒 Fermeture du dossier en cours..." });
+        await closeTicket(client, interaction.guild, ticket, interaction.user, "Fermeture via le bouton.");
+    }
+}
+
+module.exports = {
+    handleDirectMessage,
+    handleChannelMessage,
+    handleCommands,
+    handleInteraction
+};
