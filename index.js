@@ -2,7 +2,7 @@ const { Client, GatewayIntentBits, Partials, ActivityType } = require('discord.j
 const express = require('express');
 require('dotenv').config();
 
-// Initialisation du Client avec TOUS les Intents et Partials nécessaires (y compris MP pour ModMail)
+// Initialisation du client avec l'intégralité des intents et partials requis
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -10,7 +10,7 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildBans,
-        GatewayIntentBits.DirectMessages // Nécessaire pour le module ModMail
+        GatewayIntentBits.DirectMessages
     ],
     partials: [
         Partials.Message, 
@@ -19,43 +19,36 @@ const client = new Client({
     ]
 });
 
-// ==========================================
-// 📌 GESTION DE LA MÉMOIRE ET ÉTATS GLOBAUX
-// ==========================================
+// État global du bot
 client.isLockdown = false;
 client.spamTracker = new Map();
 
 // ==========================================
-// 📦 IMPORT DES MODULES
+// 📦 IMPORTATION DES 4 MODULES DU DOSSIER
 // ==========================================
 const { processHeatSpam } = require('./modules/heatEngine');
-const { handleJoinGate } = require('./modules/joinGate');
+const { handleAntiRaid } = require('./modules/antiRaid');
 const { initAntiNuke } = require('./modules/antiNuke');
 const { handleModMail, handleStaffCommands } = require('./modules/modMail');
 
 // ==========================================
-// 🚀 ÉVÉNEMENT : BOT PRÊT (ready)
+// 🚀 ÉVÉNEMENT : BOT PRÊT (Ready)
 // ==========================================
 client.once('ready', (c) => {
     console.log(`\n==========================================`);
-    console.log(`✅ [TEAM HELORIA FORTRESS] Connecté en tant que : ${c.user.tag}`);
-    console.log(`🛡️  Systèmes Anti-Spam, JoinGate, Anti-Nuke & ModMail : Opérationnels`);
+    console.log(`✅ [HELORIA FORTRESS] Connecté sous : ${c.user.tag}`);
+    console.log(`🛡️  Systèmes Anti-Spam, Anti-Raid, Anti-Nuke & ModMail : Actifs`);
     console.log(`==========================================\n`);
 
-    // Initialisation du module Anti-Nuke
+    // Démarrage de la surveillance globale Anti-Nuke
     initAntiNuke(client);
 
-    // ==========================================
-    // 🎭 CONFIGURATION DU STATUT ET DE L'ACTIVITÉ
-    // ==========================================
-    // Options pour 'status' : 'online' (En ligne), 'idle' (Inactif), 'dnd' (Ne pas déranger), 'invisible' (Masqué)
-    // Options pour 'type'   : ActivityType.Playing, ActivityType.Streaming, ActivityType.Listening, ActivityType.Watching, ActivityType.Competing, ActivityType.Custom
-
+    // Statut professionnel en français
     client.user.setPresence({
-        status: 'online', // Changez ici selon votre préférence ('online', 'idle', 'dnd', 'invisible')
+        status: 'dnd', // Ne Pas Déranger
         activities: [
             {
-                name: '🛡️ Protection Fortress V2 | /help',
+                name: '🔒 Sécurisation du serveur | Support : MP',
                 type: ActivityType.Custom
             }
         ]
@@ -66,53 +59,51 @@ client.once('ready', (c) => {
 // 📡 ÉCOUTEURS D'ÉVÉNEMENTS
 // ==========================================
 
-// 1. Filtrage aux entrées (JoinGate / Anti-Raid / Anti-Bot)
+// 1. Détection aux entrées (Anti-Raid / JoinGate / Anti-Bot)
 client.on('guildMemberAdd', async (member) => {
-    await handleJoinGate(client, member);
+    await handleAntiRaid(client, member);
 });
 
-// 2. Traitement des messages (Anti-Spam Heat Engine & ModMail)
+// 2. Traitement des messages (Anti-Spam & ModMail)
 client.on('messageCreate', async (message) => {
-    // Évite les boucles avec d'autres bots
     if (message.author.bot) return;
 
-    // Gestion des Messages Privés (ModMail)
+    // Messages Privés -> Support ModMail
     if (!message.guild) {
         await handleModMail(client, message);
         return;
     }
 
-    // Gestion des commandes Staff dans les salons ModMail (!reply, !close)
+    // Commandes Staff dans les tickets (!reply, !close, !bunker)
     await handleStaffCommands(client, message);
 
-    // Moteur Anti-Spam (Heat Engine)
+    // Filtre Anti-Spam dynamique
     await processHeatSpam(client, message);
 });
 
 // ==========================================
-// 🌐 SERVEUR EXPRESS (Fix Render Port Timeout)
+// 🌐 SERVEUR WEB EXPRESS (Keep-Alive Render)
 // ==========================================
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-    res.send('🛡️ Team HeLoRiA Fortress Bot est 100% en ligne !');
+    res.send('🛡️ Le système de protection HeLoRiA Fortress est pleinement opérationnel.');
 });
 
 app.listen(PORT, () => {
-    console.log(`🌐 [Render WebServer] Serveur web actif sur le port ${PORT}`);
+    console.log(`🌐 [Serveur Web] Écoute active sur le port ${PORT}`);
 });
 
 // ==========================================
-// 🛡️ SÉCURITÉ ANTI-CRASH
+// 🛡️ PROTECTION ANTI-CRASH
 // ==========================================
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason) => {
     console.error('⚠️ [Anti-Crash] Rejet non géré :', reason);
 });
 
-process.on('uncaughtException', (err, origin) => {
+process.on('uncaughtException', (err) => {
     console.error('⚠️ [Anti-Crash] Exception non capturée :', err);
 });
 
-// Connexion au Token Discord
 client.login(process.env.DISCORD_TOKEN);
