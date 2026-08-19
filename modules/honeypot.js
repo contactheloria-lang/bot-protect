@@ -1,10 +1,11 @@
 const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 
-// Configuration
-const HONEYPOT_CHANNEL_ID = 'TON_ID_DE_SALON_HONEYPOT'; // ID du salon piège
-const STAFF_PIN_CODE = '4927'; // Code PIN requis pour le staff
+// Configuration du salon et du rôle
+const HONEYPOT_CHANNEL_ID = '1538677488128102501';
+const ADMIN_ROLE_ID = '1532015026851020871';
+const STAFF_PIN_CODE = '4927';
 
-// Emojis de ton système
+// Émojis du système
 const EMOJIS = {
     TELESCOPE: '<:65264telescope:1537586517453832222>',
     CROWN: '<a:darkbluecrown:1533535362566324245>',
@@ -28,87 +29,91 @@ const EMOJIS = {
     WARNING: '<:warningd:1533535400176386068>'
 };
 
-// Stockage temporaire des membres du staff authentifiés
+// Registre des membres autorisés
 const authenticatedStaff = new Set();
 
 /**
- * Crée l'embed d'avertissement permanent pour le salon Honeypot
+ * Génère l'intégration d'avertissement officiel pour le salon piège
  */
 function createHoneypotEmbed(client) {
     return new EmbedBuilder()
-        .setTitle(`${EMOJIS.WARNING} ${EMOJIS.LOCK} SALON SÉCURISÉ — ZONE INTERDITE ${EMOJIS.LOCK} ${EMOJIS.WARNING}`)
+        .setTitle(`${EMOJIS.WARNING} ${EMOJIS.LOCK} **SALON SÉCURISÉ — ZONE DE RESTRICTION** ${EMOJIS.LOCK} ${EMOJIS.WARNING}`)
         .setDescription(
-            `# ${EMOJIS.CROWN} **SYSTÈME DE DÉTECTION AUTOMATISÉ**\n\n` +
-            `> ${EMOJIS.QUILL} ***Attention :*** Ce salon fait partie intégrante du système de sécurité **HeLoRiA Fortress**. Il est exclusivement conçu pour piéger et neutraliser les comptes automatisés et les tentatives de raid.\n\n` +
+            `# ${EMOJIS.CROWN} **DISPOSITIF DE PROTECTION AUTOMATISÉ**\n\n` +
+            `> ${EMOJIS.QUILL} ***Avertissement officiel :*** *Ce salon est sous la surveillance directe du module de sécurité **HeLoRiA Fortress**. Il sert de piège de sécurité destiné à intercepter et neutraliser les comptes automatisés ainsi que les tentatives de raid.*\n\n` +
             `~~` + '─'.repeat(32) + `~~\n\n` +
-            `### ${EMOJIS.RULES} **AIDE-MÉMOIRE & RÈGLES D'ACCÈS**\n` +
-            `* ${EMOJIS.BLURPLE_BAN} **Interdiction absolue :** N'envoyez **AUCUN** message dans ce salon sous aucun prétexte.\n` +
-            `* ${EMOJIS.UPDATE} **Sanction automatique :** Tout envoi de message déclenche une expulsion immédiate du serveur.\n` +
-            `* ${EMOJIS.CERTIFIED} **Membre légitime :** Si vous êtes un humain, ignorez simplement ce salon et poursuivez votre navigation.\n\n` +
+            `### ${EMOJIS.RULES} **DIRECTIVES ET CONSIGNES D'ACCÈS**\n` +
+            `* ${EMOJIS.BLURPLE_BAN} **Interdiction absolue :** *Ne publiez **AUCUN** message dans cet espace sous peine de sanction automatique.*\n` +
+            `* ${EMOJIS.UPDATE} **Procédure d'expulsion :** *Toute interaction textuelle provoque l'expulsion immédiate et sans préavis du serveur.*\n` +
+            `* ${EMOJIS.CERTIFIED} **Utilisateurs légitimes :** *Si vous êtes un utilisateur humain, veuillez ignorer ce salon et poursuivre votre navigation.*\n\n` +
             `~~` + '─'.repeat(32) + `~~`
         )
         .setColor(0xFF0000)
         .setFooter({ 
-            text: "HeLoRiA Fortress • Sécurité Anti-Raid", 
+            text: "HeLoRiA Fortress • Système de Sécurité Anti-Raid", 
             iconURL: client.user.displayAvatarURL() 
         })
         .setTimestamp();
 }
 
 /**
- * Gestionnaire principal du Honeypot
+ * Module principal de gestion du salon piège
  */
 module.exports = function initHoneypot(client) {
     client.on('messageCreate', async (message) => {
-        // Filtrage du salon et des bots
         if (message.channel.id !== HONEYPOT_CHANNEL_ID) return;
         if (message.author.bot) return;
 
-        const isStaff = message.member.permissions.has(PermissionFlagsBits.Administrator) || 
-                        message.member.permissions.has(PermissionFlagsBits.ManageMessages);
+        // Commande d'installation de l'affichage officiel
+        if (message.content === '!installation-piege' && message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            await message.channel.send({ embeds: [createHoneypotEmbed(client)] });
+            await message.delete().catch(() => {});
+            return;
+        }
 
-        // --- GESTION DU STAFF (AVEC CODE PIN) ---
+        // Vérification de la présence du rôle ou de la permission d'administration
+        const isStaff = message.member.roles.cache.has(ADMIN_ROLE_ID) || 
+                        message.member.permissions.has(PermissionFlagsBits.Administrator);
+
+        // --- PROCÉDURE DE VÉRIFICATION POUR LE PERSONNEL AUTORISÉ ---
         if (isStaff) {
-            // Si le staff est déjà authentifié, le message passe
             if (authenticatedStaff.has(message.author.id)) return;
 
-            // Si le staff envoie le code PIN valide
             if (message.content.trim() === STAFF_PIN_CODE) {
                 await message.delete().catch(() => {});
                 authenticatedStaff.add(message.author.id);
 
                 const confirmMsg = await message.channel.send(
-                    `${EMOJIS.CERTIFIED} <@${message.author.id}>, **Code PIN valide.** Accès staff déverrouillé pour ce salon.`
+                    `${EMOJIS.CERTIFIED} <@${message.author.id}>, **Code de sécurité validé.** *Accès autorisé pour ce salon.*`
                 );
                 setTimeout(() => confirmMsg.delete().catch(() => {}), 4000);
                 return;
             }
 
-            // Si le staff n'a pas mis le bon PIN
             await message.delete().catch(() => {});
             const pinNotice = await message.channel.send(
-                `${EMOJIS.LOCK} <@${message.author.id}>, **Salon verrouillé.** Entrez le **code PIN Staff** dans ce salon pour débloquer la parole.`
+                `${EMOJIS.LOCK} <@${message.author.id}>, **Espace verrouillé.** *Veuillez saisir le **code de sécurité** dans ce salon pour débloquer votre accès.*`
             );
             setTimeout(() => pinNotice.delete().catch(() => {}), 5000);
             return;
         }
 
-        // --- GESTION DES MEMBRES NORMAUX (HONEYPOT) ---
+        // --- SANCTION AUTOMATIQUE DES INTRUS ---
         try {
             await message.delete().catch(() => {});
 
             if (message.member && message.member.kickable) {
-                await message.member.kick('🚨 Honeypot : Message envoyé dans un salon piège interdit.');
-                console.log(`🚨 [HONEYPOT] Membre expulsé : ${message.author.tag} (${message.author.id})`);
+                await message.member.kick('🚨 Détection piège : Publication interdite dans le salon de sécurité.');
+                console.log(`🚨 [SÉCURITÉ] Utilisateur expulsé : ${message.author.tag} (${message.author.id})`);
             }
 
             const warningMsg = await message.channel.send(
-                `${EMOJIS.WARNING} <@${message.author.id}> a été expulsé. **Rappel :** Ce salon est une zone piège.`
+                `${EMOJIS.WARNING} <@${message.author.id}> *a été expulsé du serveur.* **Rappel :** *Ce salon est une zone sous contrôle strict.*`
             );
             setTimeout(() => warningMsg.delete().catch(() => {}), 5000);
 
         } catch (err) {
-            console.error('⚠️ [HONEYPOT ERROR] Échec de l\'expulsion :', err);
+            console.error('⚠️ [ERREUR SÉCURITÉ] Échec de la procédure d\'expulsion :', err);
         }
     });
 };
