@@ -29,7 +29,7 @@ function isImmune(userId, guild, config) {
 }
 
 /**
- * Audit Log Sentinel : Récupère l'exécuteur de l'action récents (5s max)
+ * Audit Log Sentinel : Récupère l'exécuteur de l'action récent (5s max)
  */
 async function getAuditExecutor(guild, auditType) {
     try {
@@ -59,11 +59,11 @@ async function registerThreatAndSanction(guild, executor, actionName, weight = 2
     let currentScore = (userThreatScore.get(executor.id) || 0) + weight;
     userThreatScore.set(executor.id, currentScore);
 
-    // Seuil de Nuke atteint (Seuil par défaut: 50 points ou 3 actions identiques en 10s)
+    // Seuil de Nuke atteint (50 points ou 3 actions identiques en 10s)
     if (timestamps.length >= 3 || currentScore >= 50) {
         const member = await guild.members.fetch(executor.id).catch(() => null);
         if (member && member.manageable) {
-            // Stripping immédiat de tous les rôles + Ban
+            // Stripping immédiat des rôles + Ban
             await member.roles.set([], `[ULTRA ANTI-NUKE] Seuil de menace dépassé: ${actionName}`).catch(() => {});
             await member.ban({ reason: `[ULTRA ANTI-NUKE] Tentative de destruction (Action: ${actionName})` }).catch(() => {});
         }
@@ -81,7 +81,7 @@ async function registerThreatAndSanction(guild, executor, actionName, weight = 2
             .setTimestamp();
 
         const logChan = await guild.channels.fetch(config.channels?.logsAntiNuke).catch(() => null);
-        if (logChan) logChan.send({ embeds: [logEmbed] });
+        if (logChan) logChan.send({ embeds: [logEmbed] }).catch(() => {});
 
         return true;
     }
@@ -90,7 +90,7 @@ async function registerThreatAndSanction(guild, executor, actionName, weight = 2
 }
 
 // -------------------------------------------------------------------
-// 💀 ANTI-BAN / ANTI-KICK NUKE
+// GESTIONNAIRES D'ÉVÉNEMENTS
 // -------------------------------------------------------------------
 async function handleGuildBanAdd(guild, ban) {
     const auditData = await getAuditExecutor(guild, AuditLogEvent.MemberBanAdd);
@@ -98,14 +98,10 @@ async function handleGuildBanAdd(guild, ban) {
 
     const isNuke = await registerThreatAndSanction(guild, auditData.executor, "Ban Massif", 30);
     if (isNuke) {
-        // Débannissement automatique de la victime si possible
         await guild.bans.remove(ban.user.id, "[ANTI-NUKE] Restauration suite à un ban malveillant").catch(() => {});
     }
 }
 
-// -------------------------------------------------------------------
-// 🟥 ANTI-CHANNEL / CATEGORY NUKE
-// -------------------------------------------------------------------
 async function handleChannelDelete(channel) {
     const guild = channel.guild;
     if (!guild) return;
@@ -115,7 +111,6 @@ async function handleChannelDelete(channel) {
 
     const isNuke = await registerThreatAndSanction(guild, auditData.executor, `Suppression Salon: ${channel.name}`, 25);
     if (isNuke) {
-        // Restauration d'urgence du salon ou de la catégorie
         await channel.clone({
             name: channel.name,
             permissionOverwrites: channel.permissionOverwrites.cache,
@@ -126,9 +121,6 @@ async function handleChannelDelete(channel) {
     }
 }
 
-// -------------------------------------------------------------------
-// 🟨 ANTI-ROLE / ANTI-PERMISSION NUKE
-// -------------------------------------------------------------------
 async function handleRoleDelete(role) {
     const guild = role.guild;
     if (!guild) return;
@@ -138,7 +130,6 @@ async function handleRoleDelete(role) {
 
     const isNuke = await registerThreatAndSanction(guild, auditData.executor, `Suppression Rôle: ${role.name}`, 25);
     if (isNuke) {
-        // Restauration automatique du rôle supprimé
         await guild.roles.create({
             name: role.name,
             color: role.color,
@@ -154,7 +145,6 @@ async function handleRoleUpdate(oldRole, newRole) {
     const guild = newRole.guild;
     if (!guild) return;
 
-    // Détection d'escalade de privilèges (Ajout d'Administrateur ou permissions dangereuses)
     const dangerousPerms = [
         PermissionsBitField.Flags.Administrator,
         PermissionsBitField.Flags.ManageGuild,
@@ -170,15 +160,11 @@ async function handleRoleUpdate(oldRole, newRole) {
 
         const isNuke = await registerThreatAndSanction(guild, auditData.executor, `Ajout Permission Sensible sur ${newRole.name}`, 35);
         if (isNuke) {
-            // Révocation instantanée de la modification
             await newRole.setPermissions(oldRole.permissions, "[ANTI-NUKE] Restauration des permissions d'origine").catch(() => {});
         }
     }
 }
 
-// -------------------------------------------------------------------
-// 🔵 ANTI-WEBHOOK NUKE
-// -------------------------------------------------------------------
 async function handleWebhookUpdate(channel) {
     const guild = channel.guild;
     if (!guild) return;
@@ -199,9 +185,6 @@ async function handleWebhookUpdate(channel) {
     }
 }
 
-// -------------------------------------------------------------------
-// ⚫ ANTI-EMOJI / STICKER NUKE
-// -------------------------------------------------------------------
 async function handleEmojiDelete(emoji) {
     const guild = emoji.guild;
     if (!guild) return;
@@ -212,7 +195,21 @@ async function handleEmojiDelete(emoji) {
     await registerThreatAndSanction(guild, auditData.executor, `Suppression Emoji: ${emoji.name}`, 15);
 }
 
+/**
+ * Fonction d'initialisation appelée par index.js au démarrage du bot
+ */
+function initAntiNuke(client) {
+    client.on("guildBanAdd", (ban) => handleGuildBanAdd(ban.guild, ban));
+    client.on("channelDelete", (channel) => handleChannelDelete(channel));
+    client.on("roleDelete", (role) => handleRoleDelete(role));
+    client.on("roleUpdate", (oldRole, newRole) => handleRoleUpdate(oldRole, newRole));
+    client.on("webhookUpdate", (channel) => handleWebhookUpdate(channel));
+    client.on("emojiDelete", (emoji) => handleEmojiDelete(emoji));
+    console.log("🛡️ Module Anti-Nuke initialisé avec succès.");
+}
+
 module.exports = {
+    initAntiNuke,
     handleGuildBanAdd,
     handleChannelDelete,
     handleRoleDelete,
