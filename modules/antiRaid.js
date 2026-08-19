@@ -5,7 +5,7 @@ const {
     ChannelType 
 } = require("discord.js");
 const fs = require("fs");
-const path = path = require("path");
+const path = require("path");
 
 const CONFIG_PATH = path.join(__dirname, "../data/fortress_config.json");
 
