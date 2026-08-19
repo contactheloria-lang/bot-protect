@@ -34,8 +34,7 @@ function isImmune(member, guild, config) {
 }
 
 /**
- * 🧠 DÉTECTION INTELLIGENTE : Normalisation & Détection Unicode/Homoglyphes
- * Nettoie les caractères invisibles, la ponctuation et décode les caractères similaires.
+ * Normalisation de texte & Détection Unicode/Homoglyphes
  */
 function normalizeText(str) {
     if (!str) return "";
@@ -90,7 +89,7 @@ async function processHeatSpam(client, message) {
     const now = Date.now();
     const settings = config.heatSettings || { maxHeat: 100, decayRatePerSec: 15 };
 
-    // 1. Refroidissement progressif du score de chaleur
+    // Refroidissement progressif du score de chaleur
     let userData = userHeatMap.get(userId) || { heat: 0, lastUpdate: now, riskScore: 0, infractions: 0 };
     const secondsPassed = (now - userData.lastUpdate) / 1000;
     userData.heat = Math.max(0, userData.heat - (secondsPassed * settings.decayRatePerSec));
@@ -100,55 +99,53 @@ async function processHeatSpam(client, message) {
     const rawContent = message.content;
     const cleanContent = normalizeText(rawContent);
 
-    // 🔴 01-20 : FLOOD / MESSAGES
-    if (rawContent.length > 500) addedHeat += 25; // Message très long
-    if (rawContent.length < 3 && rawContent.length > 0) addedHeat += 5; // Message très court
-    if (rawContent.split('\n').length > 5) addedHeat += 20; // Flood de lignes
-    if ((rawContent.match(/[A-Z]/g) || []).length / rawContent.length > 0.7 && rawContent.length > 8) addedHeat += 15; // Flood majuscules
-    if (/[\u200B-\u200D\uFEFF]/.test(rawContent)) addedHeat += 30; // Caractères invisibles
-    if (/(.)\1{4,}/.test(rawContent)) addedHeat += 15; // Même lettre/caractère répété
+    // FLOOD / MESSAGES
+    if (rawContent.length > 500) addedHeat += 25;
+    if (rawContent.length < 3 && rawContent.length > 0) addedHeat += 5;
+    if (rawContent.split('\n').length > 5) addedHeat += 20;
+    if ((rawContent.match(/[A-Z]/g) || []).length / rawContent.length > 0.7 && rawContent.length > 8) addedHeat += 15;
+    if (/[\u200B-\u200D\uFEFF]/.test(rawContent)) addedHeat += 30;
+    if (/(.)\1{4,}/.test(rawContent)) addedHeat += 15;
 
-    // 🟠 21-35 : RÉPÉTITION / SIMILARITÉ / CROSS-CHANNEL
+    // RÉPÉTITION / SIMILARITÉ / CROSS-CHANNEL
     let history = userHistoryMap.get(userId) || [];
-    history = history.filter(item => now - item.timestamp < 60000); // Garde 60s d'historique
+    history = history.filter(item => now - item.timestamp < 60000);
 
     for (const prev of history) {
         const similarity = getSimilarityRatio(rawContent, prev.content);
         if (similarity > 0.85) {
-            addedHeat += 30; // Message similaire ou copier-coller
+            addedHeat += 30;
             if (prev.channelId !== message.channel.id) {
-                addedHeat += 45; // Cross-channel spam (Spam multi-salons)
+                addedHeat += 45;
             }
             break;
         }
     }
 
-    // 🟡 36-46 : MENTIONS
+    // MENTIONS
     const totalMentions = message.mentions.users.size + message.mentions.roles.size;
     if (totalMentions > 0) addedHeat += totalMentions * 12;
-    if (message.mentions.everyone) addedHeat += 60; // Ping @everyone / @here
+    if (message.mentions.everyone) addedHeat += 60;
 
-    // 🟢 47-61 : MÉDIAS & PIÈCES JOINTES
+    // MÉDIAS & PIÈCES JOINTES
     if (message.attachments.size > 0) addedHeat += message.attachments.size * 20;
     if (message.stickers.size > 0) addedHeat += message.stickers.size * 15;
 
-    // 🔵 62-72 : LIENS & INVITATIONS DISCORD
+    // LIENS & INVITATIONS DISCORD
     if (/(https?:\/\/[^\s]+)/g.test(rawContent)) {
         addedHeat += 20;
         if (/(discord\.gg|discord\.com\/invite)/g.test(rawContent)) {
-            addedHeat += 40; // Pub / Invitation Discord
+            addedHeat += 40;
         }
     }
 
-    // Mémorisation du message
     history.push({ content: rawContent, cleanContent, channelId: message.channel.id, timestamp: now });
     userHistoryMap.set(userId, history);
 
-    // Cumul de chaleur
     userData.heat += addedHeat;
     userHeatMap.set(userId, userData);
 
-    // ⚙️ 155-163 : SANCTION EN CAS DE SURCHAUFFE
+    // SANCTION EN CAS DE SURCHAUFFE
     if (userData.heat >= settings.maxHeat) {
         userData.heat = 0;
         userData.infractions += 1;
@@ -156,9 +153,8 @@ async function processHeatSpam(client, message) {
 
         await message.delete().catch(() => {});
 
-        // Escalade progressive des sanctions (Timeout -> Kick -> Ban)
         const durationMinutes = Math.min(1440, 5 * Math.pow(2, userData.infractions - 1));
-        
+
         if (message.member?.manageable) {
             if (userData.infractions >= 4) {
                 await message.member.ban({ reason: "[ULTRA ANTI-SPAM] Récidive massive de spam." }).catch(() => {});
@@ -167,7 +163,6 @@ async function processHeatSpam(client, message) {
             }
         }
 
-        // Notification Log
         const logEmbed = new EmbedBuilder()
             .setColor("#D32F2F")
             .setTitle("🛡️ INTERCEPTION ULTRA ANTI-SPAM")
@@ -180,7 +175,7 @@ async function processHeatSpam(client, message) {
             .setTimestamp();
 
         const logChan = await client.channels.fetch(config.channels?.logsAntiSpam).catch(() => null);
-        if (logChan) logChan.send({ embeds: [logEmbed] });
+        if (logChan) logChan.send({ embeds: [logEmbed] }).catch(() => {});
 
         return true;
     }
@@ -189,7 +184,7 @@ async function processHeatSpam(client, message) {
 }
 
 /**
- * ⬛ 81-87 : SPAM DE RÉACTIONS
+ * SPAM DE RÉACTIONS
  */
 async function handleReactionSpam(client, reaction, user) {
     if (user.bot) return;
@@ -201,7 +196,7 @@ async function handleReactionSpam(client, reaction, user) {
     timestamps.push(now);
     userReactionMap.set(user.id, timestamps);
 
-    if (timestamps.length > 6) { // Plus de 6 réactions en 10s
+    if (timestamps.length > 6) {
         await reaction.remove().catch(() => {});
         const member = await reaction.message.guild?.members.fetch(user.id).catch(() => null);
         if (member && member.manageable && !isImmune(member, reaction.message.guild, config)) {
@@ -211,7 +206,7 @@ async function handleReactionSpam(client, reaction, user) {
 }
 
 /**
- * 🟫 101-108 : SPAM VOCAL (JOIN/LEAVE EN BOUCLE)
+ * SPAM VOCAL (JOIN/LEAVE EN BOUCLE)
  */
 async function handleVoiceSpam(client, oldState, newState) {
     const member = newState.member || oldState.member;
@@ -220,7 +215,6 @@ async function handleVoiceSpam(client, oldState, newState) {
     const config = getConfig();
     if (!config) return;
 
-    // Détection changement/connexion salon vocal
     if (oldState.channelId !== newState.channelId) {
         const now = Date.now();
         let timestamps = (userVoiceMap.get(member.id) || []).filter(t => now - t < 15000);
@@ -235,7 +229,7 @@ async function handleVoiceSpam(client, oldState, newState) {
 }
 
 /**
- * 🟨 109-114 : SPAM DE PROFIL / CHANGEMENT DE PSEUDO
+ * SPAM DE PROFIL / CHANGEMENT DE PSEUDO
  */
 async function handleProfileSpam(client, oldMember, newMember) {
     if (oldMember.nickname === newMember.nickname) return;
@@ -254,12 +248,11 @@ async function handleProfileSpam(client, oldMember, newMember) {
 }
 
 /**
- * ⚙️ COMMANDES ADMINISTRATIVES (!antispam / /antispam)
+ * COMMANDES ADMINISTRATIVES (!antispam)
  */
 async function handleAntiSpamCommands(client, message) {
     if (!message.guild || !message.content.startsWith("!antispam")) return;
 
-    // Vérification des permissions
     if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
         return message.reply("❌ Vous devez être Administrateur pour configurer l'Anti-Spam.");
     }
@@ -289,7 +282,27 @@ async function handleAntiSpamCommands(client, message) {
     return message.reply("⚙️ **Utilisation :** `!antispam <on|off>` pour le salon actuel, ou `!antispam clear @user` pour réinitialiser un membre.");
 }
 
+/**
+ * Fonction d'initialisation appelable dans index.js
+ */
+function initAntiSpam(client) {
+    client.on("messageCreate", async (message) => {
+        if (message.content.startsWith("!antispam")) {
+            await handleAntiSpamCommands(client, message);
+        } else {
+            await processHeatSpam(client, message);
+        }
+    });
+
+    client.on("messageReactionAdd", (reaction, user) => handleReactionSpam(client, reaction, user));
+    client.on("voiceStateUpdate", (oldState, newState) => handleVoiceSpam(client, oldState, newState));
+    client.on("guildMemberUpdate", (oldMember, newMember) => handleProfileSpam(client, oldMember, newMember));
+
+    console.log("🛡️ Module Anti-Spam initialisé avec succès.");
+}
+
 module.exports = {
+    initAntiSpam,
     processHeatSpam,
     handleReactionSpam,
     handleVoiceSpam,
