@@ -27,7 +27,7 @@ const { processHeatSpam } = require('./modules/heatEngine');
 const { handleAntiRaid } = require('./modules/antiRaid');
 const { initAntiNuke } = require('./modules/antiNuke');
 const { handleModMail, handleStaffCommands } = require('./modules/modMail');
-const initHoneypot = require('./honeypot'); // Module Honeypot
+const initHoneypot = require('./modules/honeypot'); // Module Honeypot
 
 client.once('ready', (c) => {
     console.log(`\n==========================================`);
