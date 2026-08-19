@@ -5,14 +5,14 @@ const {
     ChannelType 
 } = require("discord.js");
 const fs = require("fs");
-const path = require("path");
+const path = path = require("path");
 
 const CONFIG_PATH = path.join(__dirname, "../data/fortress_config.json");
 
 // Buffers de mémoire vive pour le suivi des seuils
 const joinTracker = [];               // Timestamps des arrivées
 const actionCounters = new Map();     // userId_actionType -> [timestamps]
-const isLockdownActive = false;
+let isLockdownActive = false;
 let isBunkerActive = false;
 
 function getConfig() {
@@ -34,7 +34,7 @@ function isImmune(memberOrId, guild, config) {
 
     if (userId === config.ownerId || userId === guild?.ownerId) return true;
     if (config.whitelist?.includes(userId)) return true;
-    
+
     if (typeof memberOrId === "object" && memberOrId?.roles) {
         if (memberOrId.roles.cache.some(r => config.whitelistRoles?.includes(r.id))) return true;
     }
@@ -49,7 +49,6 @@ async function fetchAuditExecutor(guild, auditType) {
         const auditLogs = await guild.fetchAuditLogs({ limit: 1, type: auditType });
         const entry = auditLogs.entries.first();
         if (!entry) return null;
-        // On s'assure que l'action s'est produite dans les 5 dernières secondes
         if (Date.now() - entry.createdTimestamp > 5000) return null;
         return entry.executor;
     } catch {
@@ -66,11 +65,9 @@ async function penalizeExecutor(guild, executor, reason, config) {
     const member = await guild.members.fetch(executor.id).catch(() => null);
     if (!member || !member.manageable) return;
 
-    // Retrait des rôles dangereux ou Ban automatique selon la gravité
     await member.roles.set([], `[ULTRA ANTI-RAID] ${reason}`).catch(() => {});
     await member.ban({ reason: `[ULTRA ANTI-RAID] ${reason}` }).catch(() => {});
 
-    // Notification Log
     const logEmbed = new EmbedBuilder()
         .setColor("#FF0000")
         .setTitle("🚨 ALERTE NEUTRALISATION ANTI-RAID")
@@ -82,28 +79,27 @@ async function penalizeExecutor(guild, executor, reason, config) {
         .setTimestamp();
 
     const logChan = await guild.channels.fetch(config.channels?.logsAntiRaid).catch(() => null);
-    if (logChan) logChan.send({ embeds: [logEmbed] });
+    if (logChan) logChan.send({ embeds: [logEmbed] }).catch(() => {});
 }
 
 // -------------------------------------------------------------------
-// 🔴 01-15 & 🟥 109-120 : DÉTECTION DE RAID & REJOINTS MASSIFS
+// DÉTECTION DE RAID & REJOINTS MASSIFS
 // -------------------------------------------------------------------
-async function handleGuildMemberAdd(client, member) {
+async function handleGuildMemberAdd(member) {
     const guild = member.guild;
     const config = getConfig();
     const now = Date.now();
 
-    // Suivi des arrivées dans la fenêtre de temps
     joinTracker.push(now);
     const timeframeSec = (config?.raidTimeframeSec || 10) * 1000;
     const recentJoins = joinTracker.filter(t => now - t < timeframeSec);
 
-    // 🟤 121-132 : MODE QUARANTAINE AUTOMATIQUE
+    // Mode Quarantaine
     if (config?.quarantineRoleId) {
         await member.roles.add(config.quarantineRoleId, "Mise en quarantaine automatique").catch(() => {});
     }
 
-    // 🟠 16-28 : ANTI-BOT NON AUTORISÉ
+    // Anti-Bot
     if (member.user.bot) {
         const executor = await fetchAuditExecutor(guild, AuditLogEvent.BotAdd);
         if (executor && !isImmune(executor.id, guild, config)) {
@@ -113,10 +109,9 @@ async function handleGuildMemberAdd(client, member) {
         }
     }
 
-    // Déclenchement de la détection de Raid entrant
+    // Déclenchement Anti-Raid
     const maxThreshold = config?.raidThreshold || 5;
     if (recentJoins.length >= maxThreshold) {
-        // Activation du verrouillage temporaire (Lockdown)
         triggerLockdown(guild, true, config);
 
         const logEmbed = new EmbedBuilder()
@@ -126,24 +121,22 @@ async function handleGuildMemberAdd(client, member) {
             .setTimestamp();
 
         const logChan = await guild.channels.fetch(config?.channels?.logsAntiRaid).catch(() => null);
-        if (logChan) logChan.send({ embeds: [logEmbed] });
+        if (logChan) logChan.send({ embeds: [logEmbed] }).catch(() => {});
     }
 }
 
 // -------------------------------------------------------------------
-// 🟢 41-79 & 🟣 80-108 : PROTECTION DES STRUCTURES (SALONS/RÔLES/CATÉGORIES)
+// PROTECTION DES STRUCTURES & PARAMÈTRES
 // -------------------------------------------------------------------
-async function handleChannelDelete(client, channel) {
+async function handleChannelDelete(channel) {
     const guild = channel.guild;
     if (!guild) return;
     const config = getConfig();
 
     const executor = await fetchAuditExecutor(guild, AuditLogEvent.ChannelDelete);
     if (executor && !isImmune(executor.id, guild, config)) {
-        // Sanction de l'auteur
         await penalizeExecutor(guild, executor, `Suppression de salon/catégorie: ${channel.name}`, config);
 
-        // Restauration automatique
         await channel.clone({
             name: channel.name,
             permissionOverwrites: channel.permissionOverwrites.cache,
@@ -154,7 +147,7 @@ async function handleChannelDelete(client, channel) {
     }
 }
 
-async function handleRoleDelete(client, role) {
+async function handleRoleDelete(role) {
     const guild = role.guild;
     if (!guild) return;
     const config = getConfig();
@@ -163,7 +156,6 @@ async function handleRoleDelete(client, role) {
     if (executor && !isImmune(executor.id, guild, config)) {
         await penalizeExecutor(guild, executor, `Suppression du rôle: ${role.name}`, config);
 
-        // Restauration automatique du rôle
         await guild.roles.create({
             name: role.name,
             color: role.color,
@@ -175,10 +167,7 @@ async function handleRoleDelete(client, role) {
     }
 }
 
-// -------------------------------------------------------------------
-// ⚠️ 169-176 : PROTECTION DES WEBHOOKS
-// -------------------------------------------------------------------
-async function handleWebhookUpdate(client, channel) {
+async function handleWebhookUpdate(channel) {
     const guild = channel.guild;
     if (!guild) return;
     const config = getConfig();
@@ -187,7 +176,6 @@ async function handleWebhookUpdate(client, channel) {
     if (executor && !isImmune(executor.id, guild, config)) {
         await penalizeExecutor(guild, executor, "Création de webhook non autorisée", config);
 
-        // Nettoyage automatique des webhooks créés
         const webhooks = await channel.fetchWebhooks().catch(() => null);
         if (webhooks) {
             webhooks.forEach(wh => {
@@ -197,17 +185,13 @@ async function handleWebhookUpdate(client, channel) {
     }
 }
 
-// -------------------------------------------------------------------
-// 🟪 192-202 : PROTECTION DE LA CONFIGURATION DU SERVEUR
-// -------------------------------------------------------------------
-async function handleGuildUpdate(client, oldGuild, newGuild) {
+async function handleGuildUpdate(oldGuild, newGuild) {
     const config = getConfig();
     const executor = await fetchAuditExecutor(newGuild, AuditLogEvent.GuildUpdate);
 
     if (executor && !isImmune(executor.id, newGuild, config)) {
         await penalizeExecutor(newGuild, executor, "Modification des paramètres du serveur", config);
 
-        // Restauration du nom / icône / paramètres
         if (oldGuild.name !== newGuild.name) await newGuild.setName(oldGuild.name).catch(() => {});
         if (oldGuild.icon !== newGuild.icon) await newGuild.setIcon(oldGuild.iconURL()).catch(() => {});
         if (oldGuild.verificationLevel !== newGuild.verificationLevel) {
@@ -217,21 +201,20 @@ async function handleGuildUpdate(client, oldGuild, newGuild) {
 }
 
 // -------------------------------------------------------------------
-// 🚨 133-145 & 🏰 146-168 : LOCKDOWN ET SYSTÈME BUNKER
+// LOCKDOWN ET SYSTÈME BUNKER
 // -------------------------------------------------------------------
 async function triggerLockdown(guild, state, config) {
+    isLockdownActive = state;
     const everyoneRole = guild.roles.everyone;
     const permissions = everyoneRole.permissions;
 
     if (state) {
-        // Verrouillage : Suppression de la permission de poster et de se connecter
         await everyoneRole.setPermissions(permissions.remove([
             PermissionsBitField.Flags.SendMessages,
             PermissionsBitField.Flags.AddReactions,
             PermissionsBitField.Flags.Connect
         ])).catch(() => {});
     } else {
-        // Rétablissement
         await everyoneRole.setPermissions(permissions.add([
             PermissionsBitField.Flags.SendMessages,
             PermissionsBitField.Flags.AddReactions,
@@ -255,7 +238,6 @@ async function handleBunkerCommand(client, message) {
         isBunkerActive = true;
         await triggerLockdown(message.guild, true, config);
 
-        // Création ou sécurisation du salon/catégorie Bunker si non existant
         let bunkerCategory = message.guild.channels.cache.find(c => c.name === "🏰-BUNKER" && c.type === ChannelType.GuildCategory);
         if (!bunkerCategory) {
             bunkerCategory = await message.guild.channels.create({
@@ -282,7 +264,21 @@ async function handleBunkerCommand(client, message) {
     return message.reply("⚙️ **Utilisation :** `!bunker on` pour verrouiller le serveur, `!bunker off` pour réouvrir.");
 }
 
+/**
+ * Fonction d'initialisation appelable dans index.js
+ */
+function initAntiRaid(client) {
+    client.on("guildMemberAdd", (member) => handleGuildMemberAdd(member));
+    client.on("channelDelete", (channel) => handleChannelDelete(channel));
+    client.on("roleDelete", (role) => handleRoleDelete(role));
+    client.on("webhookUpdate", (channel) => handleWebhookUpdate(channel));
+    client.on("guildUpdate", (oldGuild, newGuild) => handleGuildUpdate(oldGuild, newGuild));
+    client.on("messageCreate", (message) => handleBunkerCommand(client, message));
+    console.log("🛡️ Module Anti-Raid initialisé avec succès.");
+}
+
 module.exports = {
+    initAntiRaid,
     handleGuildMemberAdd,
     handleChannelDelete,
     handleRoleDelete,
