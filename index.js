@@ -27,14 +27,16 @@ const { processHeatSpam } = require('./modules/heatEngine');
 const { handleAntiRaid } = require('./modules/antiRaid');
 const { initAntiNuke } = require('./modules/antiNuke');
 const { handleModMail, handleStaffCommands } = require('./modules/modMail');
+const initHoneypot = require('./honeypot'); // Module Honeypot
 
 client.once('ready', (c) => {
     console.log(`\n==========================================`);
     console.log(`✅ [HELORIA FORTRESS] Connecté sous : ${c.user.tag}`);
-    console.log(`🛡️  Systèmes Anti-Spam, Anti-Raid, Anti-Nuke & ModMail : Actifs`);
+    console.log(`🛡️  Systèmes Anti-Spam, Anti-Raid, Anti-Nuke, ModMail & Honeypot : Actifs`);
     console.log(`==========================================\n`);
 
     initAntiNuke(client);
+    initHoneypot(client); // Initialisation du Honeypot
 
     client.user.setPresence({
         status: 'dnd',
