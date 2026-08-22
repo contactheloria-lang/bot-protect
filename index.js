@@ -22,47 +22,48 @@ const client = new Client({
 client.isLockdown = false;
 client.spamTracker = new Map();
 
-// Importation des modules
-const { processHeatSpam } = require('./modules/heatEngine');
-const { handleAntiRaid } = require('./modules/antiRaid');
-const { initAntiNuke } = require('./modules/antiNuke');
-const { handleModMail, handleStaffCommands } = require('./modules/modMail');
-const initHoneypot = require('./modules/honeypot'); // Module Honeypot
+// MODULES EN PAUSE POUR LA MAINTENANCE
+// const { processHeatSpam } = require('./modules/heatEngine');
+// const { handleAntiRaid } = require('./modules/antiRaid');
+// const { initAntiNuke } = require('./modules/antiNuke');
+// const { handleModMail, handleStaffCommands } = require('./modules/modMail');
+// const initHoneypot = require('./modules/honeypot');
 
 client.once('ready', (c) => {
     console.log(`\n==========================================`);
-    console.log(`✅ [HELORIA FORTRESS] Connecté sous : ${c.user.tag}`);
-    console.log(`🛡️  Systèmes Anti-Spam, Anti-Raid, Anti-Nuke, ModMail & Honeypot : Actifs`);
+    console.log(`🛠️ [HELORIA FORTRESS] Connecté sous : ${c.user.tag}`);
+    console.log(`⚠️  Systèmes de protection suspendus (Mode Maintenance)`);
     console.log(`==========================================\n`);
-
-    initAntiNuke(client);
-    initHoneypot(client); // Initialisation du Honeypot
 
     client.user.setPresence({
         status: 'dnd',
         activities: [
             {
-                name: '🔒 Sécurisation du serveur | Support : MP',
+                name: '🛠️ Maintenance Protect | Systèmes en pause',
                 type: ActivityType.Custom
             }
         ]
     });
 });
 
+// Neutralisation des événements pendant la maintenance
 client.on('guildMemberAdd', async (member) => {
-    await handleAntiRaid(client, member);
+    // Anti-Raid suspendu
 });
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
+    // ModMail, Anti-Spam et commandes Staff suspendus
+});
 
-    if (!message.guild) {
-        await handleModMail(client, message);
-        return;
+// Bloquer d'éventuelles commandes d'interactions
+client.on('interactionCreate', async (interaction) => {
+    if (interaction.isCommand() || interaction.isButton()) {
+        return interaction.reply({
+            content: "🛠️ **Le bot Protect est actuellement en maintenance.** Les commandes de sécurité sont temporairement désactivées.",
+            ephemeral: true
+        }).catch(() => {});
     }
-
-    await handleStaffCommands(client, message);
-    await processHeatSpam(client, message);
 });
 
 // Serveur Web Express
@@ -70,7 +71,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-    res.send('🛡️ Le système de protection HeLoRiA Fortress est pleinement opérationnel.');
+    res.send('🛠️ Le système HeLoRiA Protect est actuellement en mode maintenance.');
 });
 
 app.listen(PORT, () => {
